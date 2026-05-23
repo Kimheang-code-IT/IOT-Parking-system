@@ -262,7 +262,7 @@ sequenceDiagram
     participant Bank as ABA Mobile
     participant ESP as Exit ESP32
 
-    Note over API: Exit process sets fee; invoice may be Pending
+    Note over API: Exit sets fee and invoice may be Pending
 
     UI->>API: GET /api/payment/active-session
     API-->>UI: plate, duration, amount
