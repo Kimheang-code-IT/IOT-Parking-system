@@ -1,0 +1,50 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Backend — secrets & local database
+backend/.env
+backend/data/
+backend/**/*.log
+
+# Frontend — dependencies & build
+frontend/node_modules/
+frontend/.nuxt/
+frontend/.output/
+frontend/.data/
+frontend/.nitro/
+frontend/.cache/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Device local env (never commit tokens)
+backend/devices/.env
+
+# IDE & OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Optional local tooling
+.cursor/
+*.local

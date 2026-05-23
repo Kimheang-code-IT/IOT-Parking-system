@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IoT Smart Parking — Presentation (13 slides)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --bg: #050a15;
+        --fg: #f1f5ff;
+        --muted: #8a9bb8;
+        --accent: #1a73e8;
+        --accent-dim: rgba(26, 115, 232, 0.12);
+        --accent2: #34a853;
+        --yellow: #fbbc04;
+        --border: rgba(255, 255, 255, 0.1);
+        --radius: 12px;
+      }
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        font-family: Inter, sans-serif;
+        background: radial-gradient(circle at top left, rgba(255,255,255,0.12) 0%, var(--bg) 40%);
+        color: var(--fg);
+        overflow: hidden;
+        height: 100vh;
+        user-select: none;
+      }
+      #bgCanvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+      .glow-blob { position: fixed; border-radius: 50%; filter: blur(110px); opacity: 0.18; z-index: 0; pointer-events: none; }
+      .g1 { width: 500px; height: 500px; background: #1a73e8; top: -160px; left: -100px; }
+      .g2 { width: 420px; height: 420px; background: #34a853; bottom: -120px; right: -60px; }
+      .progress-bar { position: fixed; top: 0; left: 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent2)); z-index: 200; transition: width 0.5s; }
+      .persistent-header {
+        position: fixed; top: 0; left: 0; width: 100%; height: 70px; z-index: 500;
+        display: flex; align-items: center; justify-content: space-between; padding: 0 40px;
+      }
+      .header-left { display: flex; align-items: center; gap: 16px; }
+      .header-logo { height: 36px; border-radius: 8px; }
+      #headerSlideTitle { font-size: 20px; font-weight: 800; color: white; text-transform: uppercase; }
+      .nav-controls {
+        position: fixed; bottom: 30px; right: 40px; z-index: 600;
+        display: flex; align-items: center; gap: 16px;
+        background: rgba(15, 23, 42, 0.85); padding: 10px 20px; border-radius: 50px; border: 1px solid var(--border);
+      }
+      .nav-btn {
+        width: 34px; height: 34px; border-radius: 8px; border: none; background: transparent;
+        color: var(--fg); cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .nav-btn:hover { background: rgba(255,255,255,0.08); }
+      .nav-btn:disabled { opacity: 0.25; cursor: default; }
+      .header-counter { font-weight: 700; color: var(--muted); min-width: 56px; text-align: center; }
+      .header-counter .current { color: var(--accent); font-size: 18px; }
+      .dot-nav { position: fixed; left: 24px; top: 50%; transform: translateY(-50%); z-index: 500; display: flex; flex-direction: column; gap: 8px; }
+      .dot-nav button { width: 10px; height: 10px; border-radius: 50%; border: none; background: var(--border); cursor: pointer; padding: 0; }
+      .dot-nav button.active { background: var(--accent); transform: scale(1.3); }
+      .slides-wrapper { position: relative; z-index: 10; height: 100vh; width: 100vw; }
+      .slide {
+        position: absolute; inset: 0; padding: 100px 60px 80px;
+        opacity: 0; pointer-events: none; transition: opacity 0.5s, transform 0.5s;
+        transform: translateX(40px); overflow-y: auto;
+      }
+      .slide.active { opacity: 1; pointer-events: auto; transform: translateX(0); }
+      .slide.exit-left { transform: translateX(-40px); opacity: 0; }
+      @keyframes animUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+      .anim-up { animation: animUp 0.55s ease both; }
+      .d1 { animation-delay: 0.08s; } .d2 { animation-delay: 0.16s; } .d3 { animation-delay: 0.24s; }
+      .team-grid { display: flex; justify-content: center; gap: 28px; flex-wrap: wrap; }
+      .team-member { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .member-info-box { text-align: center; }
+      .member-name { font-weight: 700; color: white; }
+      .member-role { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+      .proj-slide { max-width: 1100px; margin: 0 auto; }
+      .proj-heading {
+        display: block !important;
+        font-size: clamp(42px, 5.5vw, 64px) !important;
+        font-weight: 800 !important;
+        color: var(--fg) !important;
+        margin-bottom: 36px !important;
+        letter-spacing: -1px;
+        line-height: 1.15;
+      }
+      .proj-heading .blue { color: var(--accent); }
+      .proj-heading .green { color: var(--accent2); }
+      .proj-sub { font-size: clamp(22px, 2.8vw, 30px); color: var(--muted); margin: -20px 0 28px; text-align: center; }
+      .proj-cover { display: flex; align-items: center; justify-content: center; min-height: 85vh; padding: 0 60px; }
+      .proj-welcome { text-align: center; width: 100%; }
+      .proj-logo { height: clamp(100px, 14vw, 160px); border-radius: 50%; margin-bottom: 32px; }
+      .proj-hero {
+        display: block !important;
+        font-size: clamp(48px, 7vw, 88px) !important;
+        font-weight: 900 !important;
+        color: var(--fg) !important;
+        line-height: 1.1; margin-bottom: 20px; letter-spacing: -2px;
+      }
+      .proj-tagline { font-size: clamp(26px, 3.2vw, 40px); color: var(--muted); margin-bottom: 16px; }
+      .proj-meta { font-size: clamp(20px, 2.4vw, 28px); color: var(--accent); font-weight: 600; }
+      .proj-agenda { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+      .proj-agenda li {
+        font-size: clamp(24px, 3vw, 38px); font-weight: 600; padding: 14px 22px;
+        border-left: 6px solid var(--accent); background: rgba(255,255,255,0.04); border-radius: 0 12px 12px 0;
+      }
+      .proj-bullets { list-style: none; display: flex; flex-direction: column; gap: 20px; }
+      .proj-bullets li { font-size: clamp(24px, 3vw, 36px); line-height: 1.45; }
+      .proj-bullets strong { color: var(--accent); }
+      .proj-structure { list-style: none; }
+      .proj-structure li { font-size: clamp(24px, 3vw, 36px); margin-bottom: 18px; }
+      .proj-steps { list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 18px; }
+      .proj-steps li {
+        font-size: clamp(24px, 3vw, 36px); padding-left: 56px; position: relative; line-height: 1.45;
+      }
+      .proj-steps li::before {
+        counter-increment: step; content: counter(step);
+        position: absolute; left: 0; width: 40px; height: 40px; background: var(--accent);
+        color: white; border-radius: 50%; font-weight: 800; font-size: 20px;
+        display: flex; align-items: center; justify-content: center; top: 2px;
+      }
+      .proj-steps code { font-size: clamp(20px, 2.4vw, 28px); color: var(--accent2); background: rgba(0,0,0,0.35); padding: 4px 12px; border-radius: 8px; }
+      .proj-flow { display: flex; flex-direction: column; gap: 6px; }
+      .proj-flow-step {
+        font-size: clamp(22px, 2.8vw, 32px); font-weight: 600; padding: 14px 20px;
+        background: rgba(255,255,255,0.05); border-radius: 12px; border: 1px solid var(--border);
+        display: flex; align-items: center; gap: 14px;
+      }
+      .proj-flow-step span {
+        width: 40px; height: 40px; background: var(--accent); color: white; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center; font-weight: 800; flex-shrink: 0;
+      }
+      .proj-flow-arrow { text-align: center; font-size: 28px; color: var(--accent); }
+      .proj-team .member-circle.proj-avatar {
+        width: clamp(100px, 11vw, 140px); height: clamp(100px, 11vw, 140px);
+        display: flex; align-items: center; justify-content: center;
+        background: var(--accent-dim); border: 4px solid var(--accent); border-radius: 50%;
+      }
+      .proj-team .member-circle span { font-size: clamp(32px, 4vw, 44px); font-weight: 900; color: var(--accent); }
+      .proj-name { font-size: clamp(18px, 2.2vw, 26px) !important; }
+      .proj-role { font-size: clamp(13px, 1.5vw, 17px) !important; }
+      .proj-thank { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; }
+      .proj-logo-sm { height: clamp(80px, 10vw, 120px); border-radius: 50%; margin-bottom: 40px; }
+      .proj-thank-title {
+        display: block !important;
+        font-size: clamp(72px, 12vw, 140px) !important;
+        font-weight: 900 !important;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        letter-spacing: -3px; line-height: 1;
+      }
+      .proj-demo .proj-steps li { font-size: clamp(26px, 3.2vw, 38px); }
+    </style>
+  </head>
+    <body>
+    <canvas id="bgCanvas"></canvas>
+    <div class="glow-blob g1"></div>
+    <div class="glow-blob g2"></div>
+    <div class="progress-bar" id="progressBar"></div>
+    <header class="persistent-header">
+      <div class="header-left">
+        <img src="frontend/app/assets/image/logo.png" alt="IoT Parking" class="header-logo" />
+        <span id="headerSlideTitle">IoT Smart Parking</span>
+      </div>
+      <div class="header-right"><i data-lucide="parking-square" style="width:36px;height:36px;color:var(--accent)"></i></div>
+    </header>
+    <div class="nav-controls">
+      <button id="btnPrevHeader" class="nav-btn" title="Previous"><i data-lucide="chevron-left"></i></button>
+      <div class="header-counter">
+        <span class="current" id="counterCurrentHeader">01</span><span style="opacity:0.5"> / </span><span class="total">13</span>
+      </div>
+      <button id="btnNextHeader" class="nav-btn" title="Next"><i data-lucide="chevron-right"></i></button>
+    </div>
+    <div class="dot-nav" id="dotNav"></div>
+
+  
+    <main class="slides-wrapper">
+      <!-- 1 — WELCOME -->
+      <section class="slide active" data-slide="0">
+        <div class="cover-new-ui proj-cover">
+          <div class="proj-welcome anim-up d1">
+            <img src="frontend/app/assets/image/logo.png" alt="Logo" class="proj-logo" />
+            <h1 class="proj-hero">IoT Smart Parking System</h1>
+            <p class="proj-tagline">Welcome — University Project Presentation</p>
+            <p class="proj-meta">IoT · FastAPI · Nuxt · SQLite · Wokwi</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 — AGENDA -->
+      <section class="slide" data-slide="1">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Agenda</h2>
+          <ul class="proj-agenda anim-up d2">
+            <li>Team members</li>
+            <li>Tools we use</li>
+            <li>Project idea</li>
+            <li>System flow</li>
+            <li>Entry flow (IoT)</li>
+            <li>Exit &amp; payment flow</li>
+            <li>Project structure</li>
+            <li>How to use the system</li>
+            <li>Summary</li>
+            <li>Live demo</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 3 — TEAM (4 people) -->
+      <section class="slide" data-slide="2">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Our <span class="blue">Team</span></h2>
+          <p class="proj-sub anim-up d2">4 members</p>
+          <div class="team-grid proj-team anim-up d3">
+            <div class="team-member">
+              <div class="member-circle proj-avatar"><span>1</span></div>
+              <div class="member-info-box">
+                <div class="member-name proj-name">Member 1</div>
+                <div class="member-role proj-role">Developer</div>
+              </div>
+            </div>
+            <div class="team-member">
+              <div class="member-circle proj-avatar"><span>2</span></div>
+              <div class="member-info-box">
+                <div class="member-name proj-name">Member 2</div>
+                <div class="member-role proj-role">Developer</div>
+              </div>
+            </div>
+            <div class="team-member">
+              <div class="member-circle proj-avatar"><span>3</span></div>
+              <div class="member-info-box">
+                <div class="member-name proj-name">Member 3</div>
+                <div class="member-role proj-role">Developer</div>
+              </div>
+            </div>
+            <div class="team-member">
+              <div class="member-circle proj-avatar"><span>4</span></div>
+              <div class="member-info-box">
+                <div class="member-name proj-name">Member 4</div>
+                <div class="member-role proj-role">Developer</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4 — TOOLS -->
+      <section class="slide" data-slide="3">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Tools <span class="green">We Use</span></h2>
+          <ul class="proj-bullets anim-up d2">
+            <li><strong>Backend:</strong> Python, FastAPI, SQLAlchemy, SQLite</li>
+            <li><strong>Frontend:</strong> Nuxt 4, Vue 3, Nuxt UI</li>
+            <li><strong>IoT:</strong> Wokwi ESP32, Python lane scripts</li>
+            <li><strong>Payment:</strong> ABA PayWay (mock QR for demo)</li>
+            <li><strong>Editor:</strong> VS Code, Cursor</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 5 — IDEA -->
+      <section class="slide" data-slide="4">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Project <span class="blue">Idea</span></h2>
+          <ul class="proj-bullets anim-up d2">
+            <li>Smart parking with <strong>IoT entry &amp; exit</strong> gates</li>
+            <li>Auto record <strong>license plate</strong> and parking time</li>
+            <li>Print <strong>ticket QR</strong> (invoice id) at entry</li>
+            <li>Calculate <strong>fee</strong> and pay with <strong>ABA / KHQR</strong> at exit</li>
+            <li><strong>Staff dashboard</strong> shows live data from database</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 6 — FLOW -->
+      <section class="slide" data-slide="5">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">System <span class="green">Flow</span></h2>
+          <div class="proj-flow anim-up d2">
+            <div class="proj-flow-step"><span>1</span> Car enters → IoT scan plate</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>2</span> API saves session + print ticket</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>3</span> Car exits → scan QR + verify fee</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>4</span> Customer pays → gate opens</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>5</span> Dashboard updates parking &amp; invoices</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7 — ENTRY FLOW (IoT) -->
+      <section class="slide" data-slide="6">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Entry Flow <span class="blue">(IoT)</span></h2>
+          <div class="proj-flow anim-up d2">
+            <div class="proj-flow-step"><span>1</span> Camera / Wokwi detects plate + vehicle type</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>2</span> Device calls <strong>POST /api/iot/entry-scan</strong></div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>3</span> API creates session <strong>PK-*</strong> + invoice <strong>IN-*</strong></div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>4</span> Printer shows ticket — QR = invoice id</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>5</span> Entry gate opens — car enters parking</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 — EXIT & PAYMENT FLOW -->
+      <section class="slide" data-slide="7">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Exit &amp; <span class="green">Payment</span> Flow</h2>
+          <div class="proj-flow anim-up d2">
+            <div class="proj-flow-step"><span>1</span> Scan ticket QR + check plate at exit</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>2</span> <strong>POST /api/iot/exit-verify</strong> → fee amount</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>3</span> Customer pays — ABA QR on Payment page</div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>4</span> Bank webhook confirms → invoice <strong>Paid</strong></div>
+            <div class="proj-flow-arrow">↓</div>
+            <div class="proj-flow-step"><span>5</span> <strong>open-gate</strong> — session Completed</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 9 — STRUCTURE -->
+      <section class="slide" data-slide="8">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Project <span class="blue">Structure</span></h2>
+          <ul class="proj-structure anim-up d2">
+            <li><strong>backend/</strong> — FastAPI, database, IoT API</li>
+            <li><strong>frontend/</strong> — Nuxt dashboard (Home, Parkings, Payment, Invoices)</li>
+            <li><strong>wokwi/</strong> — entry-gate &amp; exit-gate simulator</li>
+            <li><strong>docs/</strong> — system documentation</li>
+            <li><strong>data/</strong> — SQLite file iot_parking.db</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 10 — HOW TO USE -->
+      <section class="slide" data-slide="9">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">How to <span class="green">Use</span></h2>
+          <ol class="proj-steps anim-up d2">
+            <li>Start API: <code>backend → run_dev.ps1</code></li>
+            <li>Start UI: <code>frontend → pnpm dev</code></li>
+            <li>Open <strong>localhost:3000</strong> for dashboard</li>
+            <li>Wokwi: set PC LAN IP in main.cpp, press entry/exit button</li>
+            <li>Test: <code>python -m scripts.test_integration</code></li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- 11 — SUMMARY -->
+      <section class="slide" data-slide="10">
+        <div class="slide-inner proj-slide">
+          <h2 class="proj-heading anim-up d1">Summary</h2>
+          <ul class="proj-bullets anim-up d2">
+            <li>One system: <strong>IoT + API + Web</strong> connected</li>
+            <li>Fees and invoices are <strong>automatic</strong></li>
+            <li>Works on <strong>one laptop</strong> (SQLite, no cloud needed for demo)</li>
+            <li><strong>20/20</strong> integration tests passed</li>
+            <li>Ready to add real camera, printer, and gate later</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 12 — LIVE DEMO -->
+      <section class="slide" data-slide="11">
+        <div class="slide-inner proj-slide proj-demo">
+          <h2 class="proj-heading anim-up d1" style="text-align: center">Live <span class="green">Demo</span></h2>
+          <ol class="proj-steps anim-up d2">
+            <li>Run API — <code>run_dev.ps1</code> + UI <code>pnpm dev</code></li>
+            <li>Open dashboard — <strong>localhost:3000</strong></li>
+            <li>Wokwi <strong>entry</strong> button → new parking row</li>
+            <li>Payment page — show <strong>ABA QR</strong> for plate</li>
+            <li>Wokwi <strong>exit</strong> → paid invoice + gate LED</li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- 13 — THANK YOU -->
+      <section class="slide" data-slide="12">
+        <div class="slide-inner proj-thank">
+          <img src="frontend/app/assets/image/logo.png" alt="" class="proj-logo-sm anim-up d1" />
+          <h1 class="proj-thank-title anim-up d2">Thank You</h1>
+        </div>
+      </section>
+    </main>
+
+  <script>
+      const slides = document.querySelectorAll(".slide");
+      const totalSlides = slides.length;
+      let currentSlide = 0;
+      let isTransitioning = false;
+      const progressBar = document.getElementById("progressBar");
+      const counterCurrent = document.getElementById("counterCurrentHeader");
+      const headerTitle = document.getElementById("headerSlideTitle");
+      const dotNav = document.getElementById("dotNav");
+      const btnPrev = document.getElementById("btnPrevHeader");
+      const btnNext = document.getElementById("btnNextHeader");
+      for (let i = 0; i < totalSlides; i++) {
+        const dot = document.createElement("button");
+        dot.setAttribute("aria-label", "Slide " + (i + 1));
+        dot.addEventListener("click", () => goToSlide(i));
+        dotNav.appendChild(dot);
+      }
+      const dots = dotNav.querySelectorAll("button");
+      function updateUI() {
+        progressBar.style.width = ((currentSlide + 1) / totalSlides) * 100 + "%";
+        counterCurrent.textContent = String(currentSlide + 1).padStart(2, "0");
+        dots.forEach((d, i) => d.classList.toggle("active", i === currentSlide));
+        btnPrev.disabled = currentSlide === 0;
+        btnNext.disabled = currentSlide === totalSlides - 1;
+        const titleEl = slides[currentSlide].querySelector("h1.proj-hero, h1.proj-thank-title, h2.proj-heading");
+        if (titleEl) headerTitle.textContent = titleEl.textContent.replace(/\s+/g, " ").trim();
+      }
+      function goToSlide(index) {
+        if (isTransitioning || index === currentSlide || index < 0 || index >= totalSlides) return;
+        isTransitioning = true;
+        const cur = slides[currentSlide];
+        const next = slides[index];
+        cur.classList.remove("active");
+        if (index > currentSlide) cur.classList.add("exit-left");
+        next.classList.add("active");
+        currentSlide = index;
+        updateUI();
+        setTimeout(() => { cur.classList.remove("exit-left"); isTransitioning = false; }, 520);
+      }
+      btnPrev.addEventListener("click", () => goToSlide(currentSlide - 1));
+      btnNext.addEventListener("click", () => goToSlide(currentSlide + 1));
+      document.addEventListener("keydown", (e) => {
+        if (["ArrowRight", "ArrowDown", " "].includes(e.key)) { e.preventDefault(); goToSlide(currentSlide + 1); }
+        else if (["ArrowLeft", "ArrowUp"].includes(e.key)) { e.preventDefault(); goToSlide(currentSlide - 1); }
+        else if (e.key === "Home") { e.preventDefault(); goToSlide(0); }
+        else if (e.key === "End") { e.preventDefault(); goToSlide(totalSlides - 1); }
+      });
+      const canvas = document.getElementById("bgCanvas");
+      const ctx = canvas.getContext("2d");
+      let particles = [];
+      function resizeCanvas() { canvas.width = innerWidth; canvas.height = innerHeight; }
+      resizeCanvas();
+      addEventListener("resize", resizeCanvas);
+      const colors = ["#1a73e8", "#34a853", "#fbbc04"];
+      for (let i = 0; i < 70; i++) {
+        particles.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+          r: Math.random() * 2 + 1.5, color: colors[i % 3] });
+      }
+      function drawParticles() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const p of particles) {
+          p.x += p.vx; p.y += p.vy;
+          if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+          if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = p.color + "99"; ctx.fill();
+        }
+        requestAnimationFrame(drawParticles);
+      }
+      drawParticles();
+      if (typeof lucide !== "undefined") lucide.createIcons();
+      updateUI();
+  </script>
+</body>
+</html>

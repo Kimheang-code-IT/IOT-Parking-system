@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IoT Smart Parking — Presentation</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+      :root {
+        --bg: #050a15;
+        --fg: #f1f5ff;
+        --muted: #8a9bb8;
+        --accent: #1a73e8;
+        --accent-dim: rgba(26, 115, 232, 0.12);
+        --accent2: #34a853;
+        --yellow: #fbbc04;
+        --border: rgba(255, 255, 255, 0.1);
+        --radius: 12px;
+      }
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body {
+        font-family: Inter, sans-serif;
+        background: radial-gradient(circle at top left, rgba(255,255,255,0.12) 0%, var(--bg) 40%);
+        color: var(--fg);
+        overflow: hidden;
+        height: 100vh;
+        user-select: none;
+      }
+      #bgCanvas { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+      .glow-blob { position: fixed; border-radius: 50%; filter: blur(110px); opacity: 0.18; z-index: 0; pointer-events: none; }
+      .g1 { width: 500px; height: 500px; background: #1a73e8; top: -160px; left: -100px; }
+      .g2 { width: 420px; height: 420px; background: #34a853; bottom: -120px; right: -60px; }
+      .progress-bar { position: fixed; top: 0; left: 0; height: 4px; background: linear-gradient(90deg, var(--accent), var(--accent2)); z-index: 200; transition: width 0.5s; }
+      .persistent-header {
+        position: fixed; top: 0; left: 0; width: 100%; height: 70px; z-index: 500;
+        display: flex; align-items: center; justify-content: space-between; padding: 0 40px;
+      }
+      .header-left { display: flex; align-items: center; gap: 16px; }
+      .header-logo { height: 36px; border-radius: 8px; }
+      #headerSlideTitle { font-size: 20px; font-weight: 800; color: white; text-transform: uppercase; }
+      .nav-controls {
+        position: fixed; bottom: 30px; right: 40px; z-index: 600;
+        display: flex; align-items: center; gap: 16px;
+        background: rgba(15, 23, 42, 0.85); padding: 10px 20px; border-radius: 50px; border: 1px solid var(--border);
+      }
+      .nav-btn {
+        width: 34px; height: 34px; border-radius: 8px; border: none; background: transparent;
+        color: var(--fg); cursor: pointer; display: flex; align-items: center; justify-content: center;
+      }
+      .nav-btn:hover { background: rgba(255,255,255,0.08); }
+      .nav-btn:disabled { opacity: 0.25; cursor: default; }
+      .header-counter { font-weight: 700; color: var(--muted); min-width: 56px; text-align: center; }
+      .header-counter .current { color: var(--accent); font-size: 18px; }
+      .dot-nav { position: fixed; left: 24px; top: 50%; transform: translateY(-50%); z-index: 500; display: flex; flex-direction: column; gap: 8px; }
+      .dot-nav button { width: 10px; height: 10px; border-radius: 50%; border: none; background: var(--border); cursor: pointer; padding: 0; }
+      .dot-nav button.active { background: var(--accent); transform: scale(1.3); }
+      .slides-wrapper { position: relative; z-index: 10; height: 100vh; width: 100vw; }
+      .slide {
+        position: absolute; inset: 0; padding: 100px 60px 80px;
+        opacity: 0; pointer-events: none; transition: opacity 0.5s, transform 0.5s;
+        transform: translateX(40px); overflow-y: auto;
+      }
+      .slide.active { opacity: 1; pointer-events: auto; transform: translateX(0); }
+      .slide.exit-left { transform: translateX(-40px); opacity: 0; }
+      @keyframes animUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+      .anim-up { animation: animUp 0.55s ease both; }
+      .d1 { animation-delay: 0.08s; } .d2 { animation-delay: 0.16s; } .d3 { animation-delay: 0.24s; }
+      .team-grid { display: flex; justify-content: center; gap: 28px; flex-wrap: wrap; }
+      .team-member { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+      .member-info-box { text-align: center; }
+      .member-name { font-weight: 700; color: white; }
+      .member-role { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+      <!-- PARKING_CSS -->
+    </style>
+  </head>
+  <!-- HEADER_BODY -->
+  <!-- SLIDES -->
+  <script>
+      const slides = document.querySelectorAll(".slide");
+      const totalSlides = slides.length;
+      let currentSlide = 0;
+      let isTransitioning = false;
+      const progressBar = document.getElementById("progressBar");
+      const counterCurrent = document.getElementById("counterCurrentHeader");
+      const headerTitle = document.getElementById("headerSlideTitle");
+      const dotNav = document.getElementById("dotNav");
+      const btnPrev = document.getElementById("btnPrevHeader");
+      const btnNext = document.getElementById("btnNextHeader");
+      for (let i = 0; i < totalSlides; i++) {
+        const dot = document.createElement("button");
+        dot.setAttribute("aria-label", "Slide " + (i + 1));
+        dot.addEventListener("click", () => goToSlide(i));
+        dotNav.appendChild(dot);
+      }
+      const dots = dotNav.querySelectorAll("button");
+      function updateUI() {
+        progressBar.style.width = ((currentSlide + 1) / totalSlides) * 100 + "%";
+        counterCurrent.textContent = String(currentSlide + 1).padStart(2, "0");
+        dots.forEach((d, i) => d.classList.toggle("active", i === currentSlide));
+        btnPrev.disabled = currentSlide === 0;
+        btnNext.disabled = currentSlide === totalSlides - 1;
+        const titleEl = slides[currentSlide].querySelector("h1.proj-hero, h1.proj-thank-title, h2.proj-heading");
+        if (titleEl) headerTitle.textContent = titleEl.textContent.replace(/\s+/g, " ").trim();
+      }
+      function goToSlide(index) {
+        if (isTransitioning || index === currentSlide || index < 0 || index >= totalSlides) return;
+        isTransitioning = true;
+        const cur = slides[currentSlide];
+        const next = slides[index];
+        cur.classList.remove("active");
+        if (index > currentSlide) cur.classList.add("exit-left");
+        next.classList.add("active");
+        currentSlide = index;
+        updateUI();
+        setTimeout(() => { cur.classList.remove("exit-left"); isTransitioning = false; }, 520);
+      }
+      btnPrev.addEventListener("click", () => goToSlide(currentSlide - 1));
+      btnNext.addEventListener("click", () => goToSlide(currentSlide + 1));
+      document.addEventListener("keydown", (e) => {
+        if (["ArrowRight", "ArrowDown", " "].includes(e.key)) { e.preventDefault(); goToSlide(currentSlide + 1); }
+        else if (["ArrowLeft", "ArrowUp"].includes(e.key)) { e.preventDefault(); goToSlide(currentSlide - 1); }
+        else if (e.key === "Home") { e.preventDefault(); goToSlide(0); }
+        else if (e.key === "End") { e.preventDefault(); goToSlide(totalSlides - 1); }
+      });
+      const canvas = document.getElementById("bgCanvas");
+      const ctx = canvas.getContext("2d");
+      let particles = [];
+      function resizeCanvas() { canvas.width = innerWidth; canvas.height = innerHeight; }
+      resizeCanvas();
+      addEventListener("resize", resizeCanvas);
+      const colors = ["#1a73e8", "#34a853", "#fbbc04"];
+      for (let i = 0; i < 70; i++) {
+        particles.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 0.4, vy: (Math.random() - 0.5) * 0.4,
+          r: Math.random() * 2 + 1.5, color: colors[i % 3] });
+      }
+      function drawParticles() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        for (const p of particles) {
+          p.x += p.vx; p.y += p.vy;
+          if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+          if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+          ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fillStyle = p.color + "99"; ctx.fill();
+        }
+        requestAnimationFrame(drawParticles);
+      }
+      drawParticles();
+      if (typeof lucide !== "undefined") lucide.createIcons();
+      updateUI();
+  </script>
+</body>
+</html>
