@@ -16,7 +16,7 @@ from app.core.bootstrap import bootstrap_database
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging_config import setup_logging
-from app.routers import dashboard, invoices, iot, parking, payment
+from app.routers import dashboard, gate, invoices, iot, parking, payment
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -83,3 +83,4 @@ app.include_router(invoices.router)
 app.include_router(payment.router)
 app.include_router(dashboard.router)
 app.include_router(iot.router)
+app.include_router(gate.router)

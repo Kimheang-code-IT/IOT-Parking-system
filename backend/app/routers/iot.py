@@ -15,6 +15,9 @@ from app.schemas.iot import (
     OpenGateOut,
     SessionStatusOut,
 )
+from app.schemas.iot_commands import DeviceCommandAckIn, DeviceCommandPollOut, GateEventIn
+from app.services.gate_command_service import GateCommandService
+from app.services.iot_device_service import IotDeviceService
 from app.services.iot_entry_service import IotEntryService
 from app.services.iot_exit_service import IotExitService
 
@@ -79,6 +82,82 @@ def exit_verify(
     if not result.success:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=result.model_dump(by_alias=True))
     return result
+
+
+@router.get("/commands/next", response_model=DeviceCommandPollOut | None)
+def poll_command(
+    device_code: str = Query(..., alias="deviceCode"),
+    db: Session = Depends(get_db),
+    device: IotDevice = Depends(verify_iot_device),
+) -> DeviceCommandPollOut | None:
+    """ESP32 polls for ENTRY_APPROVED / EXIT_APPROVED / EXIT_DENIED."""
+    if device_code != device.device_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "Device code mismatch."},
+        )
+    row = GateCommandService(db).poll_next(device_code)
+    if not row:
+        db.commit()
+        return None
+    IotDeviceService(db).touch_last_seen(device)
+    db.commit()
+    payload = GateCommandService.payload(row)
+    return DeviceCommandPollOut(
+        commandId=row.id,
+        command=row.command,  # type: ignore[arg-type]
+        payload=payload,
+        message=payload.get("message", row.command),
+    )
+
+
+@router.post("/commands/ack")
+def ack_command(
+    body: DeviceCommandAckIn,
+    db: Session = Depends(get_db),
+    device: IotDevice = Depends(verify_iot_device),
+) -> dict:
+    if body.device_code != device.device_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "Device code mismatch."},
+        )
+    row = GateCommandService(db).ack(body.command_id, body.device_code, body.status == "completed")
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Command not found.")
+    IotDeviceService(db).log_event(
+        device,
+        "COMMAND_ACK",
+        payload=body.model_dump(by_alias=True),
+        success=body.status == "completed",
+        message=body.detail or "Command acknowledged.",
+    )
+    db.commit()
+    return {"success": True, "message": "Acknowledged."}
+
+
+@router.post("/gate/event")
+def gate_event(
+    body: GateEventIn,
+    db: Session = Depends(get_db),
+    device: IotDevice = Depends(verify_iot_device),
+) -> dict:
+    """ESP32 reports car passed / gate closed (IR sensor or simulator button)."""
+    if body.device_code != device.device_code:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"success": False, "message": "Device code mismatch."},
+        )
+    IotDeviceService(db).log_event(
+        device,
+        body.event.upper(),
+        license_plate=None,
+        payload=body.model_dump(by_alias=True),
+        success=True,
+        message=f"Gate event: {body.event}",
+    )
+    db.commit()
+    return {"success": True, "message": "Event recorded."}
 
 
 @router.post("/open-gate", response_model=OpenGateOut)

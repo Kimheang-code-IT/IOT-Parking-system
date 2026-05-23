@@ -1,0 +1,6 @@
+[wokwi]
+version = 1
+firmware = 'main.py'
+gdbServerPort = 3333
+elf = ''
+firmwareBinary = ''

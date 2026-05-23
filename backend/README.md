@@ -2,7 +2,7 @@
 
 FastAPI + SQLite for the Nuxt dashboard and Wokwi / lane scripts.
 
-**Full system documentation (presentation + testing):** [../docs/SYSTEM_DOCUMENTATION.md](../docs/SYSTEM_DOCUMENTATION.md)
+**Full system documentation:** [../README.md](../README.md)
 
 ## Setup
 
@@ -35,4 +35,4 @@ python -m scripts.test_integration
 
 ## IoT
 
-See [docs/IOT_DEVICES.md](docs/IOT_DEVICES.md) for device headers and endpoints (also covered in SYSTEM_DOCUMENTATION.md).
+See [docs/IOT_DEVICES.md](docs/IOT_DEVICES.md) for device headers. Overview and flows: [../README.md](../README.md).

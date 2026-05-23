@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "author": "IOT Parking",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 120, "attrs": {} },
+    {
+      "type": "wokwi-servo",
+      "id": "servoEntry",
+      "top": 220,
+      "left": 40,
+      "attrs": { "label": "Entry gate" }
+    },
+    {
+      "type": "wokwi-servo",
+      "id": "servoExit",
+      "top": 220,
+      "left": 280,
+      "attrs": { "label": "Exit gate" }
+    },
+    {
+      "type": "wokwi-lcd1602",
+      "id": "lcd",
+      "top": 40,
+      "left": 360,
+      "attrs": { "pins": "i2c" }
+    },
+    { "type": "wokwi-led", "id": "ledGreen", "top": 200, "left": 480, "attrs": { "color": "green", "label": "OK" } },
+    { "type": "wokwi-led", "id": "ledRed", "top": 240, "left": 480, "attrs": { "color": "red", "label": "ERR" } },
+    { "type": "wokwi-buzzer", "id": "buzzer", "top": 280, "left": 480, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnEntryScan",
+      "top": 380,
+      "left": 0,
+      "attrs": { "color": "green", "label": "Scan entry plate" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnEntryClose",
+      "top": 420,
+      "left": 0,
+      "attrs": { "color": "green", "label": "Close entry gate" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnInvoiceScan",
+      "top": 380,
+      "left": 160,
+      "attrs": { "color": "blue", "label": "Scan invoice QR" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnExitScan",
+      "top": 420,
+      "left": 160,
+      "attrs": { "color": "blue", "label": "Scan exit plate" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnPayOk",
+      "top": 380,
+      "left": 320,
+      "attrs": { "color": "gold", "label": "Payment success" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btnExitClose",
+      "top": 420,
+      "left": 320,
+      "attrs": { "color": "blue", "label": "Close exit gate" }
+    }
+  ],
+  "connections": [
+    [ "servoEntry:V+", "esp:5V", "red", [] ],
+    [ "servoEntry:GND", "esp:GND.2", "black", [] ],
+    [ "servoEntry:PWM", "esp:18", "orange", [] ],
+    [ "servoExit:V+", "esp:5V", "red", [] ],
+    [ "servoExit:GND", "esp:GND.3", "black", [] ],
+    [ "servoExit:PWM", "esp:19", "orange", [] ],
+    [ "lcd:SCL", "esp:22", "green", [] ],
+    [ "lcd:SDA", "esp:21", "green", [] ],
+    [ "lcd:VCC", "esp:5V", "red", [] ],
+    [ "lcd:GND", "esp:GND.1", "black", [] ],
+    [ "ledGreen:A", "esp:25", "green", [] ],
+    [ "ledGreen:C", "esp:GND.4", "black", [] ],
+    [ "ledRed:A", "esp:26", "green", [] ],
+    [ "ledRed:C", "esp:GND.5", "black", [] ],
+    [ "buzzer:1", "esp:33", "green", [] ],
+    [ "buzzer:2", "esp:GND.6", "black", [] ],
+    [ "btnEntryScan:1.l", "esp:3V3", "green", [] ],
+    [ "btnEntryScan:2.r", "esp:27", "green", [] ],
+    [ "btnEntryClose:1.l", "esp:3V3", "green", [] ],
+    [ "btnEntryClose:2.r", "esp:14", "green", [] ],
+    [ "btnInvoiceScan:1.l", "esp:3V3", "green", [] ],
+    [ "btnInvoiceScan:2.r", "esp:12", "green", [] ],
+    [ "btnExitScan:1.l", "esp:3V3", "green", [] ],
+    [ "btnExitScan:2.r", "esp:13", "green", [] ],
+    [ "btnPayOk:1.l", "esp:3V3", "green", [] ],
+    [ "btnPayOk:2.r", "esp:15", "green", [] ],
+    [ "btnExitClose:1.l", "esp:3V3", "green", [] ],
+    [ "btnExitClose:2.r", "esp:4", "green", [] ]
+  ]
+}

@@ -76,6 +76,16 @@ def _ensure_iot_devices(db: Session, settings) -> None:
             last_seen_at=now,
             created_at=now,
         ),
+        IotDevice(
+            device_code="GATE_SIM_01",
+            device_name="Wokwi Combined Gate Simulator",
+            device_type="GATE_SIM",
+            location="Simulator",
+            status="Active",
+            device_token=settings.iot_entry_device_token,
+            last_seen_at=now,
+            created_at=now,
+        ),
     ]
     db.add_all(devices)
 
