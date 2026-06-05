@@ -8,6 +8,9 @@ export interface ActiveVehicle {
   entryTime: string
   duration: string
   amount: number
+  invoiceId?: string
+  sessionId?: string
+  paymentStatus?: string
 }
 
 export interface BankInfo {

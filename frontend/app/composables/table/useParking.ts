@@ -2,6 +2,7 @@
  * Parking composables — all data from FastAPI / PostgreSQL.
  */
 import { ref, computed, onMounted } from 'vue'
+import { useParkingLiveSync } from '~/composables/useParkingLiveSync'
 import { useServerTableResource } from '~/composables/table/useServerTableResource'
 import { useApiConfig } from '~/composables/useApiConfig'
 import {
@@ -56,6 +57,8 @@ export function useParkingDashboard() {
     refresh()
   })
 
+  useParkingLiveSync(refresh)
+
   return {
     stats,
     occupancyTrend,
@@ -92,16 +95,19 @@ export function useParkingHistory() {
     exitDateTo: toIso(exitDateRange.value.end)
   }))
 
-  const { rows: entries, isLoading: pending } = useServerTableResource<ParkingEntry, ParkingQuery>({
+  const { rows: entries, isLoading: pending, refresh } = useServerTableResource<ParkingEntry, ParkingQuery>({
     resourceKey: 'parking-history',
     serverQuery,
     listFn: (query, signal) => fetchParkingEntries(query, signal)
   })
 
+  useParkingLiveSync(refresh)
+
   return {
     entries,
     columns: PARKING_COLUMNS,
     pending,
+    refresh,
     searchQuery,
     selectedStatus,
     selectedType,

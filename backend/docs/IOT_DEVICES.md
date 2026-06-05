@@ -53,8 +53,10 @@ Run on a Raspberry Pi or lane PC next to the hardware:
 
 | Script | Role |
 |--------|------|
-| `devices/entry_station.py` | Entry: LPR plate → API → print ticket → optional gate |
-| `devices/exit_station.py` | Exit: barcode hash + plate → verify → wait payment → open gate |
+| `devices/lane_workstation.py` | PC one-button entry/exit (OpenCV camera) |
+| `devices/entry_station.py` | Optional CLI entry lane (no Wokwi) |
+| `devices/exit_station.py` | Optional CLI exit lane (no Wokwi) |
+| `wokwi/parking-gate/` | **Wokwi simulator** — MicroPython, entry + exit buttons |
 | `devices/client.py` | Shared HTTP client |
 
 ```bash
@@ -70,7 +72,7 @@ set DEVICE_TOKEN=secret-exit-token
 python devices/exit_station.py --hash ABCDEFGHJKLM --plate 2A-1234
 ```
 
-Replace `read_plate_from_camera()`, `print_ticket()`, and `open_exit_gate()` stubs with your vendor SDKs (GPIO, ESC/POS, ANPR, USB QR wedge).
+**Wokwi:** open only `wokwi/parking-gate/` (not other folders). Replace `read_plate_from_camera()`, `print_ticket()`, and GPIO stubs with your vendor SDKs on real hardware.
 
 ## API endpoints for devices
 

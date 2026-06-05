@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     # When true, bootstrap/seed adds sample sessions (off by default — use scripts/reset_db.py --demo)
     seed_demo_data: bool = False
 
+    gate_use_camera: bool = True
+    gate_camera_index: int = 0
+    gate_camera_warmup_ms: int = 1500
+    gate_camera_prepare_seconds: int = 10
+    gate_camera_scan_seconds: int = 30
+    gate_show_camera_preview: bool = True
+    gate_tesseract_cmd: str = ""
+    gate_camera_fallback_plate: str = "WK-SIM01"
+    gate_receipt_dir: str = "data/receipts"
+    gate_auto_mock_payment: bool = True
+
     @model_validator(mode="after")
     def set_callback_url(self) -> "Settings":
         if not self.aba_pay_callback_url:

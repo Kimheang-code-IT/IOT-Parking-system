@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { fetchActiveVehicle, fetchAbaQr, fetchBankInfo } from '~/data/payment'
+import { useParkingLiveSync } from '~/composables/useParkingLiveSync'
+import { fetchActiveVehicle, fetchAbaQr, fetchBankInfo, verifyPayment } from '~/data/payment'
 import type { AbaQrResponse } from '~/data/payment'
 import { TABLE_PANEL_UI, PAYMENT_PAGE_BODY_CLASS } from '~/utils/tablePanelLayout'
 import CommonAppKhqrCard from '~/components/common/AppKhqrCard.vue'
@@ -17,6 +18,8 @@ const loadError = ref('')
 const qrLoading = ref(false)
 const qrError = ref('')
 const abaQr = ref<AbaQrResponse | null>(null)
+const invoiceId = ref<string | undefined>(undefined)
+const payConfirmLoading = ref(false)
 
 async function loadActiveVehicle() {
   loading.value = true
@@ -29,6 +32,7 @@ async function loadActiveVehicle() {
     entryTime.value = vehicle.entryTime
     duration.value = vehicle.duration
     amount.value = vehicle.amount
+    invoiceId.value = vehicle.invoiceId
     hasActiveSession.value = true
     await loadAbaQr()
   } catch {
@@ -37,10 +41,24 @@ async function loadActiveVehicle() {
     entryTime.value = '—'
     duration.value = '—'
     amount.value = 0
-    loadError.value = 'No vehicle awaiting payment. Data comes from the database when a session is active.'
+    invoiceId.value = undefined
+    loadError.value = 'No vehicle awaiting payment. Scan exit barcode at the gate or wait for an active session.'
     abaQr.value = null
   } finally {
     loading.value = false
+  }
+}
+
+async function confirmSandboxPayment() {
+  if (!hasActiveSession.value || amount.value <= 0) return
+  payConfirmLoading.value = true
+  try {
+    await verifyPayment(plateNumber.value, amount.value, 'ABA PAY', undefined, invoiceId.value)
+    await loadActiveVehicle()
+  } catch (err: any) {
+    qrError.value = err?.data?.message || err?.message || 'Payment confirmation failed.'
+  } finally {
+    payConfirmLoading.value = false
   }
 }
 
@@ -52,7 +70,7 @@ async function loadAbaQr() {
   qrLoading.value = true
   qrError.value = ''
   try {
-    abaQr.value = await fetchAbaQr(plateNumber.value, amount.value)
+    abaQr.value = await fetchAbaQr(plateNumber.value, amount.value, invoiceId.value)
   } catch (err: any) {
     abaQr.value = null
     qrError.value = err?.data?.message || err?.message || 'Failed to generate ABA payment QR.'
@@ -74,6 +92,8 @@ onMounted(() => {
   loadActiveVehicle()
   loadBankInfo()
 })
+
+useParkingLiveSync(loadActiveVehicle)
 </script>
 
 <template>
@@ -186,6 +206,17 @@ onMounted(() => {
             <UBadge variant="soft" color="neutral" size="sm" class="font-bold italic shrink-0 sm:hidden w-fit">
               Rate: $2.00 / Hour
             </UBadge>
+            <UButton
+              v-if="hasActiveSession && amount > 0"
+              class="shrink-0 w-fit"
+              color="primary"
+              variant="soft"
+              size="sm"
+              :loading="payConfirmLoading"
+              @click="confirmSandboxPayment"
+            >
+              Confirm payment (sandbox)
+            </UButton>
           </div>
 
           <!-- KHQR-style payment card -->

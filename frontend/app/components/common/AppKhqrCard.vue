@@ -44,7 +44,7 @@ const formattedAmount = computed(() => {
 
     <!-- Amount only -->
     <div class="bg-white px-6 pb-4 pt-5 text-center dark:bg-neutral-900">
-      <p class="text-2xl py-4 font-bold tracking-tight text-neutral-900 dark:text-white sm:text-3xl">
+      <p class="text-2xl font-bold tracking-tight text-neutral-900 dark:text-white sm:text-3xl">
         {{ formattedAmount }}
       </p>
     </div>

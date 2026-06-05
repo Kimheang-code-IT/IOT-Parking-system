@@ -17,7 +17,12 @@ from app.services.parking_fee_service import ParkingFeeService
 from app.services.parking_service import ParkingService
 from app.services.plate_service import normalize_plate
 from app.utils.datetime_utils import duration_between, format_display_datetime, format_iso, utc_now
-from app.utils.exit_verify_utils import normalize_verify_hash_scan
+from app.core.config import get_settings
+from app.utils.exit_verify_utils import (
+    normalize_verify_hash_scan,
+    parse_exit_barcode,
+    validate_exit_barcode_against_invoice,
+)
 
 
 class IotExitService:
@@ -65,16 +70,37 @@ class IotExitService:
         )
 
     def verify_exit(self, payload: ExitVerifyIn, device: IotDevice) -> ExitVerifyOut:
-        plate = normalize_plate(payload.license_plate)
-        verify_hash = normalize_verify_hash_scan(payload.verify_hash) or payload.verify_hash.strip().upper()
-        invoice = self.invoices.get_by_verify_hash(verify_hash)
-        if not invoice and payload.invoice_id:
-            invoice = self.invoices.get_by_id(payload.invoice_id.strip())
-        if not invoice:
-            return self._fail(device, payload, plate, "Invalid exit barcode or verification code.")
-
-        if normalize_plate(invoice.license_plate) != plate:
-            return self._fail(device, payload, plate, "License plate does not match invoice.")
+        scan = parse_exit_barcode(payload.verify_hash)
+        if scan and scan.license_plate and scan.invoice_id:
+            plate = normalize_plate(scan.license_plate)
+            verify_hash = scan.verify_hash
+            invoice = self.invoices.get_by_id(scan.invoice_id)
+            if not invoice:
+                return self._fail(device, payload, plate, "Invalid exit barcode — invoice not found.")
+            session = self.parking.get_by_id(invoice.session_id)
+            if not session:
+                return self._fail(device, payload, plate, "Parking session not found.")
+            settings = get_settings()
+            err = validate_exit_barcode_against_invoice(
+                scan,
+                invoice_id=invoice.id,
+                license_plate=invoice.license_plate,
+                verify_hash=invoice.exit_verify_hash or "",
+                session_id=session.id,
+                secret=settings.exit_verify_secret,
+            )
+            if err:
+                return self._fail(device, payload, plate, err)
+        else:
+            plate = normalize_plate(payload.license_plate)
+            verify_hash = normalize_verify_hash_scan(payload.verify_hash) or payload.verify_hash.strip().upper()
+            invoice = self.invoices.get_by_verify_hash(verify_hash)
+            if not invoice and payload.invoice_id:
+                invoice = self.invoices.get_by_id(payload.invoice_id.strip())
+            if not invoice:
+                return self._fail(device, payload, plate, "Invalid exit barcode or verification code.")
+            if normalize_plate(invoice.license_plate) != plate:
+                return self._fail(device, payload, plate, "License plate does not match invoice.")
 
         session = self.parking.get_by_id(invoice.session_id)
         if not session:

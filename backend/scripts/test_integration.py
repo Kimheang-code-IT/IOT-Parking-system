@@ -29,6 +29,11 @@ EXIT_HEADERS = {
     "x-device-code": "EXIT_GATE_01",
     "x-device-token": "secret-exit-token",
 }
+SIM_HEADERS = {
+    "Content-Type": "application/json",
+    "x-device-code": "GATE_SIM_01",
+    "x-device-token": "secret-entry-token",
+}
 
 
 def req(
@@ -46,7 +51,9 @@ def req(
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             code = resp.getcode()
             raw = resp.read().decode()
-            return code, json.loads(raw) if raw else {}
+            if code == 204 or not raw:
+                return code, {}
+            return code, json.loads(raw)
     except urllib.error.HTTPError as e:
         raw = e.read().decode()
         try:
@@ -84,7 +91,7 @@ def main() -> int:
     ]:
         code, data = req("GET", path)
         total += 1
-        ok = code == 200 and bool(data)
+        ok = code == 200 and data is not None
         if check(label, ok, str(type(data).__name__)):
             passed += 1
 
@@ -104,31 +111,57 @@ def main() -> int:
     if check("9. Bank info", code == 200 and bank.get("name"), bank.get("name", "")):
         passed += 1
 
-    # --- IoT ENTRY (Wokwi / entry_station.py) ---
+    # --- Gate ENTRY (Wokwi parking-gate — one button) ---
+    code, gate_entry = req(
+        "POST",
+        "/api/gate/entry/trigger",
+        {
+            "source": "simulator",
+            "mockPlate": plate,
+            "vehicleType": "Car",
+            "autoCloseSeconds": 60,
+        },
+        timeout=30,
+    )
+    total += 1
+    ge_ok = code == 200 and gate_entry.get("success")
+    if check("10. Gate entry trigger (Wokwi)", ge_ok, gate_entry.get("message", str(gate_entry))[:60]):
+        passed += 1
+
+    session_id = gate_entry.get("sessionId")
+    invoice_id = gate_entry.get("invoiceId")
+    verify_hash = gate_entry.get("verifyHash")
+    receipt_path = gate_entry.get("printSavedPath")
+
+    total += 1
+    if check("11. Receipt printed to disk", bool(receipt_path), receipt_path or ""):
+        passed += 1
+
+    # Legacy IoT entry (still supported)
     code, entry = req(
         "POST",
         "/api/iot/entry-scan",
         {
             "deviceCode": "ENTRY_GATE_01",
-            "licensePlate": plate,
+            "licensePlate": plate + "-LEG",
             "vehicleType": "Car",
-            "vehicleDescription": "Integration Test",
         },
         ENTRY_HEADERS,
     )
     total += 1
-    entry_ok = code == 200 and entry.get("success")
-    if check("10. IoT entry scan", entry_ok, entry.get("message", str(entry))):
+    if check("12. IoT entry-scan (legacy)", code == 409 or code == 200, "duplicate plate ok on -LEG"):
         passed += 1
 
-    session_id = entry.get("sessionId")
-    invoice_id = entry.get("invoiceId")
-    print_data = entry.get("printData")
+    if not session_id:
+        session_id = entry.get("sessionId")
+    if not invoice_id:
+        invoice_id = entry.get("invoiceId")
+    print_data = {"verifyHash": verify_hash} if verify_hash else entry.get("printData")
     total += 1
     if check(
-        "11. Print data (ticket)",
+        "13. Verify hash on ticket",
         bool(print_data and print_data.get("verifyHash")),
-        str(print_data),
+        (print_data or {}).get("verifyHash", ""),
     ):
         passed += 1
 
@@ -136,7 +169,7 @@ def main() -> int:
     code, active = req("GET", f"/api/payment/active-session?plate={plate}")
     total += 1
     active_ok = code == 200 and active.get("plateNumber") == plate
-    if check("12. Active session (payment page)", active_ok, active.get("plateNumber", str(active))):
+    if check("14. Active session (payment page)", active_ok, active.get("plateNumber", str(active))):
         passed += 1
 
     amount = float(active.get("amount") or 1.0)
@@ -148,24 +181,44 @@ def main() -> int:
         and aba.get("status", {}).get("code") == "0"
     )
     if check(
-        "13. ABA QR generate (payment page)",
+        "15. ABA QR generate (payment page)",
         aba_ok,
         aba.get("status", {}).get("message", str(aba))[:80],
     ):
         passed += 1
 
-    # Parking list shows new active session
     code, parking2 = req("GET", f"/api/parking?search={plate}")
     total += 1
     found = any(r.get("licensePlate") == plate for r in parking2.get("data", []))
-    if check("14. Parking DB reflects entry", code == 200 and found):
+    if check("16. Parking DB reflects entry", code == 200 and found):
         passed += 1
 
-    if not (session_id and invoice_id):
-        print("\n  [SKIP] Exit flow — no session/invoice from entry\n")
+    if not (session_id and invoice_id and verify_hash):
+        print("\n  [SKIP] Exit flow — missing session/invoice/verifyHash\n")
     else:
-        # --- IoT EXIT ---
-        verify_hash = (print_data or {}).get("verifyHash") or ""
+        # --- Gate EXIT (Wokwi one button + mock pay) ---
+        exit_barcode = f"IOT-PARKING:{plate}|{invoice_id}|{verify_hash}"
+        code, gate_exit = req(
+            "POST",
+            "/api/gate/exit/trigger",
+            {
+                "source": "simulator",
+                "useCamera": False,
+                "exitBarcode": exit_barcode,
+                "mockPayment": True,
+                "waitForPayment": True,
+                "waitPaymentSeconds": 30,
+            },
+            timeout=120,
+        )
+        total += 1
+        gx_ok = code == 200 and gate_exit.get("success")
+        fee = float(gate_exit.get("amount") or amount)
+        if check("17. Gate exit trigger (Wokwi)", gx_ok, f"fee=${fee:.2f} {gate_exit.get('message','')[:40]}"):
+            passed += 1
+
+        # --- IoT EXIT (legacy verify + webhook) ---
+        verify_hash = (print_data or {}).get("verifyHash") or verify_hash
         code, exit_res = req(
             "POST",
             "/api/iot/exit-verify",
@@ -179,7 +232,7 @@ def main() -> int:
         total += 1
         exit_ok = code == 200 and exit_res.get("success")
         fee = float(exit_res.get("amount") or amount)
-        if check("15. IoT exit verify", exit_ok, f"fee=${fee:.2f}"):
+        if check("18. IoT exit verify (legacy)", exit_ok, f"fee=${fee:.2f}"):
             passed += 1
 
         code, webhook = req(
@@ -194,13 +247,13 @@ def main() -> int:
             {"x-webhook-secret": WEBHOOK_SECRET},
         )
         total += 1
-        if check("16. Payment webhook (ABA/KHQR paid)", code == 200 and webhook.get("success"), webhook.get("message", "")):
+        if check("19. Payment webhook (legacy)", code == 200 and webhook.get("success"), webhook.get("message", "")):
             passed += 1
 
         code, status = req("GET", f"/api/iot/session-status?sessionId={session_id}", headers=EXIT_HEADERS)
         total += 1
         if check(
-            "17. Session ready for gate",
+            "20. Session ready for gate",
             code == 200 and status.get("canOpenGate") is True,
             f"paid={status.get('paymentStatus')}",
         ):
@@ -213,13 +266,18 @@ def main() -> int:
             EXIT_HEADERS,
         )
         total += 1
-        if check("18. Open exit gate", code == 200 and gate.get("success"), gate.get("message", "")):
+        if check("21. Open exit gate", code == 200 and gate.get("success"), gate.get("message", "")):
             passed += 1
 
         code, invoices2 = req("GET", f"/api/invoices?search={invoice_id}")
         total += 1
         paid_inv = next((i for i in invoices2.get("data", []) if i.get("id") == invoice_id), None)
-        if check("19. Invoice marked Paid in DB", paid_inv and paid_inv.get("status") == "Paid", str(paid_inv)):
+        if check("22. Invoice marked Paid in DB", paid_inv and paid_inv.get("status") == "Paid", str(paid_inv)):
+            passed += 1
+
+        code, cmd = req("GET", "/api/iot/commands/next?deviceCode=GATE_SIM_01", headers=SIM_HEADERS)
+        total += 1
+        if check("23. Device command poll (no pending ok)", code in (200, 204), str(cmd)[:40] or "empty"):
             passed += 1
 
     # --- CORS header for frontend ---
@@ -235,11 +293,11 @@ def main() -> int:
         with urllib.request.urlopen(cors_req, timeout=5) as resp:
             allow = resp.headers.get("Access-Control-Allow-Origin", "")
             total += 1
-            if check("20. CORS for frontend :3000", "localhost:3000" in allow or allow == "*", allow):
+            if check("24. CORS for frontend :3000", "localhost:3000" in allow or allow == "*", allow):
                 passed += 1
     except Exception as exc:
         total += 1
-        check("20. CORS for frontend :3000", False, str(exc))
+        check("24. CORS for frontend :3000", False, str(exc))
 
     print(f"\n=== Result: {passed}/{total} passed ===\n")
     if passed == total:

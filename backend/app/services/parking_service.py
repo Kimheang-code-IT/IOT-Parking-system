@@ -5,6 +5,7 @@ from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.models.invoice import Invoice
 from app.models.parking_session import ParkingSession
 from app.schemas.parking import ParkingEntryOut
 from app.services.parking_fee_service import ParkingFeeService
@@ -155,12 +156,27 @@ class ParkingService:
             return None
         now = utc_now()
         total_minutes, _, long_display = duration_between(session.entry_time, now)
-        amount = float(self.fee_service.calculate_fee(total_minutes))
+        if session.fee_amount is not None:
+            amount = float(session.fee_amount)
+        else:
+            amount = float(self.fee_service.calculate_fee(total_minutes))
         vehicle_type = session.vehicle_description or session.vehicle_type
+        invoice = (
+            self.db.query(Invoice)
+            .filter(Invoice.session_id == session.id)
+            .order_by(Invoice.created_at.desc())
+            .first()
+        )
+        if invoice and invoice.amount and session.fee_amount is not None:
+            amount = float(invoice.amount)
+        payment_status = invoice.status if invoice else None
         return {
             "plateNumber": session.license_plate,
             "vehicleType": vehicle_type,
             "entryTime": format_display_datetime(session.entry_time, with_am_pm=True),
             "duration": long_display,
             "amount": amount,
+            "invoiceId": invoice.id if invoice else None,
+            "sessionId": session.id,
+            "paymentStatus": payment_status,
         }

@@ -9,9 +9,16 @@ from app.schemas.dashboard import (
     TrendPointOut,
     VehicleTypePointOut,
 )
+from app.core.parking_revision import get_parking_revision
 from app.services.dashboard_service import DashboardService
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+
+@router.get("/revision")
+def parking_revision() -> dict[str, float]:
+    """Frontend polls this; when value changes, reload dashboard / parking / payment."""
+    return {"revision": get_parking_revision()}
 
 
 @router.get("/stats", response_model=list[DashboardStatOut])

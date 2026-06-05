@@ -12,6 +12,7 @@ from app.services.parking_service import ParkingService
 from app.services.plate_service import normalize_plate
 from app.utils.datetime_utils import utc_now
 from app.utils.id_generator import next_transaction_ref
+from app.core.parking_revision import bump_parking_revision
 from app.models.payment_transaction import PaymentTransaction
 
 
@@ -98,6 +99,7 @@ class PaymentService:
         self.invoice_service.mark_paid(invoice, payment_method, tx_ref)
         self._save_transaction(session.id, plate, amount, payment_method, True, "Payment verified successfully.", tx_ref)
         self.db.commit()
+        bump_parking_revision()
 
         return PaymentVerifyOut(
             success=True,
@@ -164,6 +166,7 @@ class PaymentService:
             tx_ref,
         )
         self.db.commit()
+        bump_parking_revision()
         return PaymentVerifyOut(
             success=True,
             message="Payment confirmed via webhook.",

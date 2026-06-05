@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { useParkingHistory } from '~/composables/table/useParking'
-import { TABLE_PANEL_UI, TABLE_PAGE_BODY_CLASS } from '~/utils/tablePanelLayout'
 
 const {
   entries,
@@ -17,7 +16,7 @@ const {
 </script>
 
 <template>
-  <UDashboardPanel id="parking" :ui="TABLE_PANEL_UI">
+  <UDashboardPanel id="parking">
     <template #header>
       <UDashboardNavbar title="Parking History">
         <template #leading>
@@ -54,14 +53,14 @@ const {
     </template>
 
     <template #body>
-      <div :class="TABLE_PAGE_BODY_CLASS">
+      <div class="-m-4">
         <TableApptable
           v-model:global-filter="searchQuery"
           v-model:filter-value="selectedStatus"
           v-model:filter-value-secondary="selectedType"
-          :filter-items="statusItems"
+          v-model:filter-items="statusItems"
           filter-placeholder="Status"
-          :filter-items-secondary="typeItems"
+          v-model:filter-items-secondary="typeItems"
           filter-placeholder-secondary="Vehicle Type"
           :data="entries"
           :columns="columns"

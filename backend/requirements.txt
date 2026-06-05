@@ -9,6 +9,9 @@ slowapi>=0.1.9
 httpx>=0.27.0
 qrcode[pil]>=7.4.2
 python-barcode[images]>=0.15.1
+opencv-python>=4.10.0
+pyzbar>=0.1.9
+pytesseract>=0.3.10
 
 # Production PostgreSQL only (install when switching DATABASE_URL):
 # pip install psycopg2-binary

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.schemas.invoice import InvoiceExitBarcodeOut, InvoiceListResult
 from app.services.invoice_service import InvoiceService
-from app.utils.exit_verify_utils import barcode_data_url
+from app.utils.exit_verify_utils import barcode_data_url, format_exit_barcode_payload
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -50,9 +50,14 @@ def invoice_exit_barcode(invoice_id: str, db: Session = Depends(get_db)) -> Invo
             detail="Exit verification code not generated for this invoice.",
         )
     code = invoice.exit_verify_hash
+    payload = format_exit_barcode_payload(
+        license_plate=invoice.license_plate,
+        invoice_id=invoice.id,
+        verify_hash=code,
+    )
     return InvoiceExitBarcodeOut(
         invoice_id=invoice.id,
         verify_hash=code,
-        barcode_image=barcode_data_url(code),
+        barcode_image=barcode_data_url(payload),
         plate=invoice.license_plate,
     )

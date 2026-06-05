@@ -9,6 +9,9 @@ class ActiveSessionOut(CamelModel):
     entry_time: str = Field(alias="entryTime")
     duration: str
     amount: float
+    invoice_id: str | None = Field(default=None, alias="invoiceId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    payment_status: str | None = Field(default=None, alias="paymentStatus")
 
 
 class PaymentVerifyIn(CamelModel):
