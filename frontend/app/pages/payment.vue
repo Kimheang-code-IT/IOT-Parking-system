@@ -1,62 +1,229 @@
 <script setup lang="ts">
 import { useParkingLiveSync } from '~/composables/useParkingLiveSync'
-import { fetchActiveVehicle, fetchAbaQr, fetchBankInfo, verifyPayment } from '~/data/payment'
+import { fetchActiveVehicle, fetchBankInfo, fetchPaymentConfig, fetchPaymentStatus, verifyPayment } from '~/data/payment'
 import type { AbaQrResponse } from '~/data/payment'
 import { TABLE_PANEL_UI, PAYMENT_PAGE_BODY_CLASS } from '~/utils/tablePanelLayout'
+import { extractApiError } from '~/utils/extractApiError'
+import { buildMockAbaQr } from '~/utils/mockPayment'
 import CommonAppKhqrCard from '~/components/common/AppKhqrCard.vue'
 import abaLogoSecondary from '~/assets/image/ABA-Logo-Secondary.png.webp'
 
 const amount = ref(0)
 const plateNumber = ref('—')
+const plateInput = ref('')
+const verifyHashInput = ref('')
 const vehicleType = ref('—')
 const entryTime = ref('—')
 const duration = ref('—')
 const bankInfo = reactive({ name: '', accountName: '', accountNumber: '' })
 const loading = ref(false)
 const hasActiveSession = ref(false)
+const ticketVerified = ref(false)
 const loadError = ref('')
 const qrLoading = ref(false)
 const qrError = ref('')
 const abaQr = ref<AbaQrResponse | null>(null)
 const invoiceId = ref<string | undefined>(undefined)
 const payConfirmLoading = ref(false)
+const paymentComplete = ref(false)
+const successMessage = ref('')
+const transactionRef = ref('')
+const statusChecking = ref(false)
+const mockOnly = ref(true)
+const showConfirmDialog = ref(false)
+
+let pollTimer: ReturnType<typeof setInterval> | null = null
+
+const BARCODE_PREFIX = 'IOT-PARKING:'
+const VERIFY_CODE_LENGTH = 4
+
+function normalizeVerifyCode(raw: string) {
+  return raw.trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, VERIFY_CODE_LENGTH)
+}
+
+function parseExitBarcode(raw: string): { plate: string; verifyHash: string } | null {
+  const text = raw.trim()
+  if (!text.toUpperCase().startsWith(BARCODE_PREFIX)) return null
+  const parts = text.slice(BARCODE_PREFIX.length).split('|').map((p) => p.trim())
+  if (parts.length !== 3 || !parts[0] || !parts[2]) return null
+  return { plate: parts[0], verifyHash: normalizeVerifyCode(parts[2]) }
+}
+
+function onVerifyCodeInput(raw: string) {
+  const parsed = parseExitBarcode(raw)
+  if (parsed) {
+    plateInput.value = parsed.plate
+    verifyHashInput.value = parsed.verifyHash
+    return
+  }
+  verifyHashInput.value = normalizeVerifyCode(raw)
+}
+
+function applyMockPaymentPreview() {
+  abaQr.value = buildMockAbaQr(plateNumber.value, amount.value, invoiceId.value)
+}
+
+function openConfirmDialog() {
+  if (hasActiveSession.value && ticketVerified.value && amount.value > 0) {
+    showConfirmDialog.value = true
+  }
+}
+
+function closeConfirmDialog() {
+  showConfirmDialog.value = false
+}
+
+async function executeMockPayment() {
+  await confirmSandboxPayment()
+  if (paymentComplete.value) {
+    closeConfirmDialog()
+  }
+}
+
+function stopPaymentPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer)
+    pollTimer = null
+  }
+}
+
+function startPaymentPolling() {
+  stopPaymentPolling()
+  if (!invoiceId.value || paymentComplete.value) return
+  pollTimer = setInterval(() => void checkPaymentStatus(true), 4000)
+}
+
+function onPaymentSuccess(message: string, ref?: string) {
+  paymentComplete.value = true
+  hasActiveSession.value = false
+  ticketVerified.value = false
+  successMessage.value = message
+  transactionRef.value = ref || ''
+  abaQr.value = null
+  stopPaymentPolling()
+}
+
+function resetForNewPayment() {
+  paymentComplete.value = false
+  successMessage.value = ''
+  transactionRef.value = ''
+  loadError.value = ''
+  qrError.value = ''
+  resetSessionDisplay()
+  plateInput.value = ''
+  verifyHashInput.value = ''
+  stopPaymentPolling()
+}
+
+function resetSessionDisplay() {
+  plateNumber.value = '—'
+  vehicleType.value = '—'
+  entryTime.value = '—'
+  duration.value = '—'
+  amount.value = 0
+  invoiceId.value = undefined
+  hasActiveSession.value = false
+  ticketVerified.value = false
+  abaQr.value = null
+}
 
 async function loadActiveVehicle() {
+  if (paymentComplete.value) return
+
+  const plate = plateInput.value.trim()
+  const verifyHash = normalizeVerifyCode(verifyHashInput.value)
+  verifyHashInput.value = verifyHash
+  if (!plate) {
+    loadError.value = 'Enter a license plate from the entry ticket.'
+    resetSessionDisplay()
+    return
+  }
+  if (!verifyHash) {
+    loadError.value = 'Enter the 4-character verify code from the entry ticket.'
+    resetSessionDisplay()
+    return
+  }
+  if (verifyHash.length !== VERIFY_CODE_LENGTH) {
+    loadError.value = `Ticket verify code must be exactly ${VERIFY_CODE_LENGTH} characters.`
+    resetSessionDisplay()
+    return
+  }
+
   loading.value = true
   loadError.value = ''
   hasActiveSession.value = false
+  ticketVerified.value = false
   try {
-    const vehicle = await fetchActiveVehicle(undefined)
+    const vehicle = await fetchActiveVehicle(plate, verifyHash)
     plateNumber.value = vehicle.plateNumber
+    plateInput.value = vehicle.plateNumber
     vehicleType.value = vehicle.vehicleType
     entryTime.value = vehicle.entryTime
     duration.value = vehicle.duration
     amount.value = vehicle.amount
     invoiceId.value = vehicle.invoiceId
     hasActiveSession.value = true
-    await loadAbaQr()
-  } catch {
-    plateNumber.value = '—'
-    vehicleType.value = '—'
-    entryTime.value = '—'
-    duration.value = '—'
-    amount.value = 0
-    invoiceId.value = undefined
-    loadError.value = 'No vehicle awaiting payment. Scan exit barcode at the gate or wait for an active session.'
-    abaQr.value = null
+    ticketVerified.value = true
+    if (vehicle.paymentStatus?.toLowerCase() === 'paid') {
+      onPaymentSuccess('Payment already completed. Proceed to the exit gate.')
+      return
+    }
+    if (mockOnly.value) {
+      applyMockPaymentPreview()
+      openConfirmDialog()
+    } else {
+      await loadAbaQr()
+      startPaymentPolling()
+    }
+  } catch (err: unknown) {
+    resetSessionDisplay()
+    loadError.value = extractApiError(err, 'No matching session. Check plate and verify code from the entry ticket.')
   } finally {
     loading.value = false
   }
 }
 
-async function confirmSandboxPayment() {
-  if (!hasActiveSession.value || amount.value <= 0) return
-  payConfirmLoading.value = true
+async function checkPaymentStatus(silent = false) {
+  if (paymentComplete.value || !invoiceId.value || !ticketVerified.value) return
+  if (!silent) statusChecking.value = true
   try {
-    await verifyPayment(plateNumber.value, amount.value, 'ABA PAY', undefined, invoiceId.value)
-    await loadActiveVehicle()
-  } catch (err: any) {
-    qrError.value = err?.data?.message || err?.message || 'Payment confirmation failed.'
+    const status = await fetchPaymentStatus(
+      invoiceId.value,
+      normalizeVerifyCode(verifyHashInput.value)
+    )
+    if (status.paid) {
+      onPaymentSuccess('Payment received. Customer may proceed to the exit gate.')
+    }
+  } catch (err: unknown) {
+    if (!silent) qrError.value = extractApiError(err, 'Could not check payment status.')
+  } finally {
+    if (!silent) statusChecking.value = false
+  }
+}
+
+async function confirmSandboxPayment() {
+  if (!hasActiveSession.value || !ticketVerified.value || amount.value <= 0) return
+  payConfirmLoading.value = true
+  qrError.value = ''
+  try {
+    const result = await verifyPayment(
+      plateNumber.value,
+      amount.value,
+      'ABA PAY',
+      undefined,
+      invoiceId.value,
+      normalizeVerifyCode(verifyHashInput.value)
+    )
+    if (result.success) {
+      onPaymentSuccess(
+        result.message || 'Payment verified. Customer may proceed to the exit gate.',
+        result.transactionRef
+      )
+    } else {
+      qrError.value = result.message || 'Payment confirmation failed.'
+    }
+  } catch (err: unknown) {
+    qrError.value = extractApiError(err, 'Payment confirmation failed.')
   } finally {
     payConfirmLoading.value = false
   }
@@ -67,15 +234,29 @@ async function loadAbaQr() {
     abaQr.value = null
     return
   }
+  if (mockOnly.value) {
+    applyMockPaymentPreview()
+    return
+  }
   qrLoading.value = true
   qrError.value = ''
   try {
+    const { fetchAbaQr } = await import('~/data/payment')
     abaQr.value = await fetchAbaQr(plateNumber.value, amount.value, invoiceId.value)
-  } catch (err: any) {
+  } catch (err: unknown) {
     abaQr.value = null
-    qrError.value = err?.data?.message || err?.message || 'Failed to generate ABA payment QR.'
+    qrError.value = extractApiError(err, 'Failed to generate ABA payment QR.')
   } finally {
     qrLoading.value = false
+  }
+}
+
+async function loadPaymentConfig() {
+  try {
+    const config = await fetchPaymentConfig()
+    mockOnly.value = config.mockOnly
+  } catch {
+    mockOnly.value = true
   }
 }
 
@@ -89,11 +270,19 @@ async function loadBankInfo() {
 }
 
 onMounted(() => {
-  loadActiveVehicle()
   loadBankInfo()
+  loadPaymentConfig()
 })
 
-useParkingLiveSync(loadActiveVehicle)
+onBeforeUnmount(() => {
+  stopPaymentPolling()
+})
+
+useParkingLiveSync(() => {
+  if (hasActiveSession.value && !paymentComplete.value && !mockOnly.value) {
+    void checkPaymentStatus(true)
+  }
+})
 </script>
 
 <template>
@@ -112,11 +301,15 @@ useParkingLiveSync(loadActiveVehicle)
               size="xs"
               class="font-bold"
               :loading="loading"
+              :disabled="!plateInput.trim() || verifyHashInput.length !== VERIFY_CODE_LENGTH"
               @click="loadActiveVehicle"
             >
               Refresh
             </UButton>
-            <UBadge v-if="hasActiveSession" color="warning" variant="subtle" size="sm">Pending Payment</UBadge>
+            <UBadge v-if="hasActiveSession && ticketVerified" color="success" variant="subtle" size="sm">
+              Ticket verified
+            </UBadge>
+            <UBadge v-else-if="hasActiveSession" color="warning" variant="subtle" size="sm">Pending Payment</UBadge>
             <UBadge v-else color="neutral" variant="subtle" size="sm">No active session</UBadge>
           </div>
         </template>
@@ -125,8 +318,19 @@ useParkingLiveSync(loadActiveVehicle)
 
     <template #body>
       <div :class="[PAYMENT_PAGE_BODY_CLASS, 'bg-muted/5']">
+        <div v-if="successMessage" class="shrink-0 mb-3 space-y-2">
+          <UAlert
+            color="success"
+            variant="subtle"
+            :title="successMessage"
+            :description="transactionRef ? `Transaction ref: ${transactionRef}` : 'Proceed to the exit gate with your ticket.'"
+          />
+          <UButton color="success" variant="soft" size="sm" @click="resetForNewPayment">
+            New payment
+          </UButton>
+        </div>
         <UAlert
-          v-if="loadError && !loading"
+          v-if="loadError && !loading && !paymentComplete"
           class="shrink-0 mb-3"
           color="neutral"
           variant="subtle"
@@ -150,11 +354,49 @@ useParkingLiveSync(loadActiveVehicle)
             </template>
             <template v-else>
               <div class="grid grid-cols-1 gap-3 shrink-0">
-                <div class="p-4 sm:p-5 rounded-lg bg-muted/30 border border-default shadow-sm">
-                  <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
-                    License Plate
-                  </p>
-                  <p class="text-3xl sm:text-4xl font-black tracking-tighter text-error truncate">
+                <div class="p-4 sm:p-5 rounded-lg bg-muted/30 border border-default shadow-sm space-y-3">
+                  <div>
+                    <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
+                      License Plate
+                    </p>
+                    <UInput
+                      v-model="plateInput"
+                      placeholder="e.g. 2A-1234"
+                      size="xl"
+                      class="w-full font-black tracking-tighter"
+                      :ui="{ base: 'text-error text-2xl sm:text-3xl uppercase' }"
+                      @keyup.enter="loadActiveVehicle"
+                    />
+                  </div>
+                  <div>
+                    <p class="text-[10px] uppercase tracking-widest font-bold text-muted-foreground mb-1">
+                      Ticket Verify Code
+                    </p>
+                    <UInput
+                      v-model="verifyHashInput"
+                      placeholder="4-character code"
+                      size="md"
+                      maxlength="4"
+                      class="w-full max-w-[8rem] font-mono uppercase tracking-[0.35em] text-center"
+                      :ui="{ base: 'text-lg font-bold' }"
+                      @update:model-value="onVerifyCodeInput"
+                      @keyup.enter="loadActiveVehicle"
+                    />
+                  </div>
+                  <UButton
+                    block
+                    color="primary"
+                    icon="i-lucide-search"
+                    :loading="loading"
+                    :disabled="!plateInput.trim() || verifyHashInput.length !== VERIFY_CODE_LENGTH"
+                    @click="loadActiveVehicle"
+                  >
+                    Look up & verify ticket
+                  </UButton>
+                  <p
+                    v-if="hasActiveSession && ticketVerified"
+                    class="text-center text-2xl sm:text-3xl font-black tracking-tighter text-error truncate"
+                  >
                     {{ plateNumber }}
                   </p>
                 </div>
@@ -206,17 +448,19 @@ useParkingLiveSync(loadActiveVehicle)
             <UBadge variant="soft" color="neutral" size="sm" class="font-bold italic shrink-0 sm:hidden w-fit">
               Rate: $2.00 / Hour
             </UBadge>
-            <UButton
-              v-if="hasActiveSession && amount > 0"
-              class="shrink-0 w-fit"
-              color="primary"
-              variant="soft"
-              size="sm"
-              :loading="payConfirmLoading"
-              @click="confirmSandboxPayment"
+
+            <div
+              v-if="hasActiveSession && ticketVerified && !paymentComplete"
+              class="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-2 shrink-0"
             >
-              Confirm payment (sandbox)
-            </UButton>
+              <p class="text-xs font-bold uppercase tracking-widest text-primary">Pay to exit</p>
+              <p class="text-sm text-muted-foreground">
+                {{ mockOnly ? 'Confirm mock payment in the dialog — demo only, no real ABA API.' : 'Scan the KHQR on the right with ABA Mobile.' }}
+              </p>
+              <div v-if="invoiceId" class="text-[10px] font-mono text-muted-foreground truncate">
+                Invoice: {{ invoiceId }}
+              </div>
+            </div>
           </div>
 
           <!-- KHQR-style payment card -->
@@ -227,10 +471,16 @@ useParkingLiveSync(loadActiveVehicle)
               :qr-image="abaQr?.qrImage"
               :bank-logo="abaQr?.bankLogo"
               :logo-embedded="abaQr?.logoEmbedded"
+              :tran-id="abaQr?.tranId"
+              :abapay-deeplink="mockOnly ? undefined : abaQr?.abapayDeeplink"
+              :mock-only="mockOnly"
               :loading="qrLoading"
               :error="qrError"
-              :show-generate="hasActiveSession"
+              :checking-status="statusChecking || payConfirmLoading"
+              :show-generate="hasActiveSession && ticketVerified && !paymentComplete"
               @generate="loadAbaQr"
+              @check-status="checkPaymentStatus(false)"
+              @pay-demo="openConfirmDialog"
             >
               <template v-if="abaQr?.qrImage" #after-qr>
                 <img
@@ -257,4 +507,55 @@ useParkingLiveSync(loadActiveVehicle)
       </div>
     </template>
   </UDashboardPanel>
+
+  <UModal v-model:open="showConfirmDialog" :dismissible="!payConfirmLoading">
+    <template #content>
+      <div class="p-6 space-y-4">
+        <div class="flex items-start gap-3">
+          <div class="rounded-full bg-primary/10 p-2">
+            <UIcon name="i-lucide-wallet" class="size-6 text-primary" />
+          </div>
+          <div>
+            <h3 class="text-lg font-bold">Confirm mock payment</h3>
+            <p class="text-sm text-muted-foreground mt-1">
+              Demo only — no real ABA PayWay API. This marks the invoice as paid in the local database.
+            </p>
+          </div>
+        </div>
+
+        <div class="rounded-lg border border-default bg-muted/20 p-4 space-y-2 text-sm">
+          <div class="flex justify-between gap-2">
+            <span class="text-muted-foreground">Plate</span>
+            <span class="font-bold uppercase">{{ plateNumber }}</span>
+          </div>
+          <div class="flex justify-between gap-2">
+            <span class="text-muted-foreground">Verify code</span>
+            <span class="font-mono font-bold">{{ verifyHashInput }}</span>
+          </div>
+          <div class="flex justify-between gap-2">
+            <span class="text-muted-foreground">Invoice</span>
+            <span class="font-mono text-xs truncate max-w-[12rem]">{{ invoiceId || '—' }}</span>
+          </div>
+          <div class="flex justify-between gap-2 border-t border-default pt-2">
+            <span class="text-muted-foreground">Amount due</span>
+            <span class="text-xl font-black text-primary">${{ amount.toFixed(2) }}</span>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2">
+          <UButton color="neutral" variant="ghost" :disabled="payConfirmLoading" @click="closeConfirmDialog">
+            Cancel
+          </UButton>
+          <UButton
+            color="primary"
+            icon="i-lucide-check"
+            :loading="payConfirmLoading"
+            @click="executeMockPayment"
+          >
+            Confirm payment
+          </UButton>
+        </div>
+      </div>
+    </template>
+  </UModal>
 </template>

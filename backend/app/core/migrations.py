@@ -7,7 +7,7 @@ from sqlalchemy import inspect, text
 from app.core.config import get_settings
 from app.core.database import SessionLocal, engine
 from app.models.invoice import Invoice
-from app.utils.exit_verify_utils import generate_exit_verify_hash
+from app.utils.exit_verify_utils import VERIFY_HASH_LENGTH, generate_exit_verify_hash
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +39,21 @@ def run_schema_migrations() -> None:
 def _backfill_exit_verify_hashes(secret: str) -> None:
     db = SessionLocal()
     try:
-        rows = db.query(Invoice).filter(Invoice.exit_verify_hash.is_(None)).all()
+        rows = db.query(Invoice).all()
+        updated: list[Invoice] = []
         for invoice in rows:
+            current = (invoice.exit_verify_hash or "").strip()
+            if current and len(current) == VERIFY_HASH_LENGTH:
+                continue
             invoice.exit_verify_hash = generate_exit_verify_hash(
                 invoice_id=invoice.id,
                 session_id=invoice.session_id,
                 license_plate=invoice.license_plate,
                 secret=secret,
             )
-        if rows:
+            updated.append(invoice)
+        if updated:
             db.commit()
-            logger.info("Backfilled exit_verify_hash for %s invoice(s)", len(rows))
+            logger.info("Backfilled exit_verify_hash for %s invoice(s)", len(updated))
     finally:
         db.close()

@@ -1,4 +1,4 @@
-import type { ActiveVehicle, BankInfo, PaymentVerifyResult } from '~/data/payment'
+import type { ActiveVehicle, BankInfo, PaymentConfig, PaymentStatus, PaymentVerifyResult } from '~/data/payment'
 import { useApiConfig } from '~/composables/useApiConfig'
 
 export interface PaymentVerifyBody {
@@ -6,6 +6,7 @@ export interface PaymentVerifyBody {
   amount: number
   paymentMethod: string
   invoiceId?: string
+  verifyHash?: string
 }
 
 export interface AbaPayStatus {
@@ -31,9 +32,16 @@ export interface AbaQrResponse {
 export function usePaymentApi() {
   const { apiUrl } = useApiConfig()
 
-  async function getActiveSession(plate?: string, signal?: AbortSignal): Promise<ActiveVehicle> {
+  async function getActiveSession(
+    plate?: string,
+    verifyHash?: string,
+    signal?: AbortSignal
+  ): Promise<ActiveVehicle> {
     return await $fetch<ActiveVehicle>(`${apiUrl.value}/api/payment/active-session`, {
-      query: plate ? { plate } : undefined,
+      query: {
+        ...(plate ? { plate } : {}),
+        ...(verifyHash ? { verifyHash } : {})
+      },
       signal
     })
   }
@@ -66,5 +74,20 @@ export function usePaymentApi() {
     })
   }
 
-  return { getActiveSession, verifyPayment, getBankInfo, getAbaQr }
+  async function getPaymentConfig(signal?: AbortSignal): Promise<PaymentConfig> {
+    return await $fetch<PaymentConfig>(`${apiUrl.value}/api/payment/config`, { signal })
+  }
+
+  async function getPaymentStatus(
+    invoiceId: string,
+    verifyHash: string,
+    signal?: AbortSignal
+  ): Promise<PaymentStatus> {
+    return await $fetch<PaymentStatus>(`${apiUrl.value}/api/payment/status`, {
+      query: { invoiceId, verifyHash },
+      signal
+    })
+  }
+
+  return { getActiveSession, verifyPayment, getBankInfo, getAbaQr, getPaymentConfig, getPaymentStatus }
 }

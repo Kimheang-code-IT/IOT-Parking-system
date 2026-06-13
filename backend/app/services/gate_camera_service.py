@@ -34,6 +34,18 @@ class GateCameraService:
             return self._normalize_plate(self.settings.gate_camera_fallback_plate)
         raise ValueError("Could not read license plate from camera. Point plate at webcam or press SPACE.")
 
+    def scan_exit_plate(self, *, use_camera: bool, mock_plate: str | None = None) -> str:
+        """Exit lane plate OCR (OpenCV capture + Tesseract on FastAPI host)."""
+        if mock_plate and mock_plate.strip():
+            return self._normalize_plate(mock_plate)
+        if use_camera and self.settings.gate_use_camera:
+            plate = self._capture_plate_opencv(mode="exit")
+            if plate:
+                return plate
+        if self.settings.gate_camera_fallback_plate:
+            return self._normalize_plate(self.settings.gate_camera_fallback_plate)
+        raise ValueError("Could not read license plate at exit. Point plate at webcam or press SPACE.")
+
     def scan_exit_barcode(self, *, use_camera: bool) -> str | None:
         if use_camera and self.settings.gate_use_camera:
             return self._capture_exit_barcode_opencv()
@@ -51,7 +63,11 @@ class GateCameraService:
             logger.warning("Camera %s not available", self.settings.gate_camera_index)
             return None
 
-        window = "IOT Parking ENTRY — prepare, then scan plate (SPACE / ESC)"
+        window = (
+            "IOT Parking EXIT — prepare, then scan plate (SPACE / ESC)"
+            if mode == "exit"
+            else "IOT Parking ENTRY — prepare, then scan plate (SPACE / ESC)"
+        )
         prepare_sec = max(0, self.settings.gate_camera_prepare_seconds)
         scan_sec = max(5, self.settings.gate_camera_scan_seconds)
         prepare_end = time.time() + prepare_sec
@@ -120,7 +136,7 @@ class GateCameraService:
                     last_debug = text.replace("\n", " ")[:60]
                     plate = self._find_plate_in_text(text)
                     if plate:
-                        logger.info("Plate OCR entry success: %s", plate)
+                        logger.info("Plate OCR %s success: %s", mode, plate)
                         self._flash_success(cv2, window, frame, plate, preview)
                         return plate
 

@@ -1584,7 +1584,7 @@
             <div class="team-grid anim-up d3">
               <div class="team-member">
                 <div class="team-photo-wrap">
-                  <img src="docs/images/team-1.jpg" alt=""
+                  <img src="docs/images/kimheang.JPG" alt=""
                     onerror="this.remove();this.parentElement.querySelector('.fallback').style.display='flex'" />
                   <span class="fallback" style="display:none">1</span>
                 </div>
@@ -1593,7 +1593,7 @@
               </div>
               <div class="team-member">
                 <div class="team-photo-wrap">
-                  <img src="docs/images/team-2.jpg" alt=""
+                  <img src="docs/images/saroeurn.JPG" alt=""
                     onerror="this.remove();this.parentElement.querySelector('.fallback').style.display='flex'" />
                   <span class="fallback" style="display:none">2</span>
                 </div>
@@ -1602,7 +1602,7 @@
               </div>
               <div class="team-member">
                 <div class="team-photo-wrap">
-                  <img src="docs/images/team-3.jpg" alt=""
+                  <img src="docs/images/virak.JPG" alt=""
                     onerror="this.remove();this.parentElement.querySelector('.fallback').style.display='flex'" />
                   <span class="fallback" style="display:none">3</span>
                 </div>
@@ -1611,7 +1611,7 @@
               </div>
               <div class="team-member">
                 <div class="team-photo-wrap">
-                  <img src="docs/images/team-4.jpg" alt=""
+                  <img src="docs/images/dyna.jpg" alt=""
                     onerror="this.remove();this.parentElement.querySelector('.fallback').style.display='flex'" />
                   <span class="fallback" style="display:none">4</span>
                 </div>
@@ -1660,25 +1660,25 @@
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">02</span>
-                <span class="agenda-col-topic">System flow</span>
+                <span class="agenda-col-topic">System Flow</span>
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">03</span>
-                <span class="agenda-col-topic">Tools we use</span>
+                <span class="agenda-col-topic">Tools We Use</span>
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">04</span>
-                <span class="agenda-col-topic">Project structure</span>
+                <span class="agenda-col-topic">Project Structure</span>
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">05</span>
-                <span class="agenda-col-topic">Entry Flow</span>
+                <span class="agenda-col-topic">How to Use</span>
               </li>
             </ul>
             <ul class="agenda-col-list agenda-col-list--right" aria-label="Agenda column 2">
               <li class="agenda-col-item">
                 <span class="agenda-col-num">06</span>
-                <span class="agenda-col-topic">Payment</span>
+                <span class="agenda-col-topic">Entry Flow</span>
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">07</span>
@@ -1686,7 +1686,7 @@
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">08</span>
-                <span class="agenda-col-topic">How To use</span>
+                <span class="agenda-col-topic">Payment</span>
               </li>
               <li class="agenda-col-item">
                 <span class="agenda-col-num">09</span>
@@ -1831,7 +1831,38 @@
       </div>
     </section>
 
-    <!-- 8 Entry Flow -->
+    <!-- 8 How to Use -->
+    <section class="slide" data-title="How to Use">
+      <div class="slide-frame">
+        <div class="slide-layout--split slide-layout--genz">
+          <div class="genz-panel genz-panel--tilt-l anim-up d3">
+            <div class="genz-orb genz-orb--cyan" aria-hidden="true"></div>
+            <span class="genz-sticker genz-sticker--tl">run it</span>
+            <span class="genz-sticker genz-sticker--br">localhost</span>
+            <div class="genz-frame">
+              <div class="genz-frame-inner">
+                <img src="docs/images/livedemo.png" alt="How to run" onerror="this.src='home.png'" />
+              </div>
+            </div>
+            <span class="genz-tag">setup · demo day</span>
+          </div>
+          <div class="slide-body slide-body--genz">
+            <h2 class="proj-heading anim-up d1">How to <span class="green">Use</span></h2>
+            <div class="genz-card anim-up d3">
+              <ul class="proj-bullets">
+                <li>API: <code>uvicorn</code> in <strong>backend/</strong></li>
+                <li>UI: <code>pnpm dev</code> in <strong>frontend/</strong></li>
+                <li>Wokwi Gateway + upload <strong>wokwi/parking-gate</strong></li>
+                <li>Open <strong>localhost:3000</strong> + this deck</li>
+                <li>Test: <code>python -m scripts.test_integration</code></li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 9 Entry Flow -->
     <section class="slide" data-title="Entry Flow">
       <div class="slide-frame">
         <div class="slide-layout--split slide-layout--split reverse slide-layout--genz">
@@ -1858,39 +1889,6 @@
               </div>
             </div>
             <span class="genz-tag">entry · plate scan</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 9 Payment -->
-    <section class="slide" data-title="Payment">
-      <div class="slide-frame">
-        <div class="slide-layout--split slide-layout--genz">
-          <div class="genz-panel genz-panel--tilt-l anim-up d3">
-            <div class="genz-orb genz-orb--pink" aria-hidden="true"></div>
-            <div class="genz-orb genz-orb--cyan" aria-hidden="true"></div>
-            <span class="genz-sticker genz-sticker--tl">PAY</span>
-            <span class="genz-sticker genz-sticker--tr">ABA</span>
-            <span class="genz-sticker genz-sticker--br">KHQR</span>
-            <div class="genz-frame">
-              <div class="genz-frame-inner">
-                <img src="docs/images/exitand payment.png" alt="Payment" onerror="this.src='home.png'" />
-              </div>
-            </div>
-            <span class="genz-tag">payment · KHQR</span>
-          </div>
-          <div class="slide-body slide-body--genz">
-            <h2 class="proj-heading anim-up d1"><span class="green">Payment</span></h2>
-            <div class="genz-card anim-up d3">
-              <ul class="proj-bullets">
-                <li>Exit scan sets fee from <strong>parking duration</strong></li>
-                <li><strong>Payment page</strong> shows active session (live sync)</li>
-                <li><strong>ABA PayWay</strong> KHQR on dashboard</li>
-                <li>Customer pays in ABA app / sandbox confirm</li>
-                <li>Webhook → invoice marked <strong>Paid</strong></li>
-              </ul>
-            </div>
           </div>
         </div>
       </div>
@@ -1927,30 +1925,32 @@
       </div>
     </section>
 
-    <!-- 11 How to Use -->
-    <section class="slide" data-title="How to Use">
+    <!-- 11 Payment -->
+    <section class="slide" data-title="Payment">
       <div class="slide-frame">
         <div class="slide-layout--split slide-layout--genz">
           <div class="genz-panel genz-panel--tilt-l anim-up d3">
+            <div class="genz-orb genz-orb--pink" aria-hidden="true"></div>
             <div class="genz-orb genz-orb--cyan" aria-hidden="true"></div>
-            <span class="genz-sticker genz-sticker--tl">run it</span>
-            <span class="genz-sticker genz-sticker--br">localhost</span>
+            <span class="genz-sticker genz-sticker--tl">PAY</span>
+            <span class="genz-sticker genz-sticker--tr">ABA</span>
+            <span class="genz-sticker genz-sticker--br">KHQR</span>
             <div class="genz-frame">
               <div class="genz-frame-inner">
-                <img src="docs/images/livedemo.png" alt="How to run" onerror="this.src='home.png'" />
+                <img src="docs/images/exitand payment.png" alt="Payment" onerror="this.src='home.png'" />
               </div>
             </div>
-            <span class="genz-tag">setup · demo day</span>
+            <span class="genz-tag">payment · KHQR</span>
           </div>
           <div class="slide-body slide-body--genz">
-            <h2 class="proj-heading anim-up d1">How to <span class="green">Use</span></h2>
+            <h2 class="proj-heading anim-up d1"><span class="green">Payment</span></h2>
             <div class="genz-card anim-up d3">
               <ul class="proj-bullets">
-                <li>API: <code>uvicorn</code> in <strong>backend/</strong></li>
-                <li>UI: <code>pnpm dev</code> in <strong>frontend/</strong></li>
-                <li>Wokwi Gateway + upload <strong>wokwi/parking-gate</strong></li>
-                <li>Open <strong>localhost:3000</strong> + this deck</li>
-                <li>Test: <code>python -m scripts.test_integration</code></li>
+                <li>Exit scan sets fee from <strong>parking duration</strong></li>
+                <li><strong>Payment page</strong> shows active session (live sync)</li>
+                <li><strong>ABA PayWay</strong> KHQR on dashboard</li>
+                <li>Customer pays in ABA app / sandbox confirm</li>
+                <li>Webhook → invoice marked <strong>Paid</strong></li>
               </ul>
             </div>
           </div>

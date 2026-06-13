@@ -11,8 +11,9 @@ from barcode.writer import ImageWriter
 from app.services.plate_service import normalize_plate
 
 BARCODE_PREFIX = "IOT-PARKING:"
-# 12-char Code128-friendly hash shown on ticket and scanned at exit
-_HASH_RE = re.compile(r"^[A-Z0-9]{8,20}$")
+VERIFY_HASH_LENGTH = 4
+# 4-char code shown on ticket and scanned at exit
+_HASH_RE = re.compile(rf"^[A-Z0-9]{{{VERIFY_HASH_LENGTH}}}$")
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,10 @@ def generate_exit_verify_hash(
     """Deterministic exit verification code from entry session + plate."""
     payload = f"{invoice_id}|{session_id}|{license_plate.strip().upper()}"
     digest = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    return "".join(chr(65 + (int(digest[i : i + 2], 16) % 26)) for i in range(0, 24, 2))
+    return "".join(
+        chr(65 + (int(digest[i : i + 2], 16) % 26))
+        for i in range(0, VERIFY_HASH_LENGTH * 2, 2)
+    )
 
 
 def format_exit_barcode_payload(

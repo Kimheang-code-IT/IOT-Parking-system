@@ -59,8 +59,8 @@ def gate_entry_trigger(body: GateEntryTriggerIn, db: Session = Depends(get_db)) 
 @router.post("/exit/trigger", response_model=GateTriggerOut)
 def gate_exit_trigger(body: GateExitTriggerIn, db: Session = Depends(get_db)) -> GateTriggerOut:
     """
-    **One button exit:** scan ticket barcode (plate|invoice|hash) only → verify → payment page / ABA → gate open.
-    Set `mockPayment: true` to skip ABA in automated tests.
+    **Exit (IoT button):** FIFO oldest session → wait for dashboard payment → open gate 20s.
+    No OpenCV/OCR at exit. Use `deferGateOpen: true`, then `completeAfterPayment: true`.
     """
     settings = get_settings()
     payload = body

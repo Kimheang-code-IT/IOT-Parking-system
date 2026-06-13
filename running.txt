@@ -1,0 +1,22 @@
+- backend run
+
+cd D:\IOT-Parking
+.\.venv\Scripts\Activate.ps1
+.\scripts\run_backend.ps1
+
+- Frontend run
+
+cd D:\IOT-Parking\frontend
+pnpm dev
+
+- getway run
+
+Run the gateway: .\wokwigw_v2.0.1_Windows_64bit\wokwigw.exe
+
+
+- In VS Code, open wokwi/parking-gate/diagram.json → Start Simulation
+
+- upload frimeware
+
+cd D:\IOT-Parking\wokwi\parking-gate
+.\upload_to_wokwi.ps1

@@ -42,6 +42,9 @@ I2C_SCL = 22
 OPEN_ANGLE = 90
 CLOSED_ANGLE = 0
 AUTO_CLOSE_SECONDS = 5
+EXIT_AUTO_CLOSE_SECONDS = 20
+PAYMENT_POLL_SECONDS = 120
+PAYMENT_POLL_INTERVAL_MS = 2000
 # Entry/exit: PC webcam OCR via FastAPI (OpenCV on the machine running uvicorn)
 USE_GATE_CAMERA = True
 
@@ -55,7 +58,10 @@ state = {
     "plate": SIM_PLATE,
     "entry_close_at": None,
     "exit_close_at": None,
+    "exit_opened": False,
 }
+
+last_payment_poll_at = 0
 
 
 def make_i2c():
@@ -217,43 +223,42 @@ def entry_button(servo_entry):
     state["verify_hash"] = res.get("verifyHash")
     plate = res.get("plateNumber") or SIM_PLATE
     state["plate"] = plate
+    state["exit_opened"] = False
     servo_set(servo_entry, OPEN_ANGLE)
     sec = res.get("autoCloseSeconds") or AUTO_CLOSE_SECONDS
     schedule_close("entry", sec)
     lcd.show("ENTRY OPEN", str(plate)[:16])
 
 
-def exit_button(servo_exit):
-    print(">>> EXIT button")
-    lcd.show("Exit...", "Scan barcode")
-    body = {
-        "source": "simulator",
-        "useCamera": USE_GATE_CAMERA,
-        "mockPayment": False,
-        "waitForPayment": True,
-        "waitPaymentSeconds": 120,
-        "autoCloseSeconds": AUTO_CLOSE_SECONDS,
-    }
-    plate = state.get("plate") or SIM_PLATE
+def check_auto_exit_on_payment(servo_entry, servo_exit):
+    """When dashboard payment succeeds, open exit servo — no exit button needed."""
+    global last_payment_poll_at
     inv = state.get("invoice_id")
     vhash = state.get("verify_hash")
-    if not USE_GATE_CAMERA and plate and inv and vhash:
-        body["exitBarcode"] = "IOT-PARKING:%s|%s|%s" % (plate, inv, vhash)
-    elif not USE_GATE_CAMERA:
-        body["mockPlate"] = plate
-        if vhash:
-            body["mockVerifyHash"] = vhash
-    res, err = post_json("/api/gate/exit/trigger", body)
-    if not res:
-        lcd.show("NO API", (err or "network")[:16])
+    if not inv or not vhash or state.get("exit_opened"):
         return
-    if err or not res.get("success"):
-        lcd.show("EXIT DENIED", (err or res.get("message", ""))[:16])
+    now = time.ticks_ms()
+    if time.ticks_diff(now, last_payment_poll_at) < PAYMENT_POLL_INTERVAL_MS:
         return
+    last_payment_poll_at = now
+    path = "/api/payment/status?invoiceId={}&verifyHash={}".format(inv, vhash)
+    data, err = get_json(path)
+    if err or not data or not data.get("paid"):
+        return
+    plate = data.get("plateNumber") or state.get("plate") or SIM_PLATE
+    print("Payment OK — auto opening exit gate")
+    lcd.show("Payment OK", "Exit opening")
     servo_set(servo_exit, OPEN_ANGLE)
-    sec = res.get("autoCloseSeconds") or AUTO_CLOSE_SECONDS
-    schedule_close("exit", sec)
-    lcd.show("EXIT OPEN", "Paid OK")
+    schedule_close("exit", EXIT_AUTO_CLOSE_SECONDS)
+    state["exit_opened"] = True
+    lcd.show("EXIT OPEN", str(plate)[:16])
+    print("Exit gate open for {}s".format(EXIT_AUTO_CLOSE_SECONDS))
+
+
+def exit_button(servo_entry, servo_exit):
+    """Exit is automatic after payment — button shows hint only."""
+    print(">>> EXIT button (auto exit after pay)")
+    lcd.show("Pay on web", "Auto exit gate")
 
 
 # ========== main ==========
@@ -319,12 +324,13 @@ else:
 
 while True:
     check_auto_close(servo_entry, servo_exit)
+    check_auto_exit_on_payment(servo_entry, servo_exit)
     e, ex = btn_entry.value(), btn_exit.value()
     if button_pressed(last_e, e):
         time.sleep_ms(80)
         entry_button(servo_entry)
     elif button_pressed(last_x, ex):
         time.sleep_ms(80)
-        exit_button(servo_exit)
+        exit_button(servo_entry, servo_exit)
     last_e, last_x = e, ex
     time.sleep_ms(20)

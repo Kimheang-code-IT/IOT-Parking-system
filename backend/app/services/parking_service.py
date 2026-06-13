@@ -179,4 +179,5 @@ class ParkingService:
             "invoiceId": invoice.id if invoice else None,
             "sessionId": session.id,
             "paymentStatus": payment_status,
+            "verifyHash": invoice.exit_verify_hash if invoice else None,
         }

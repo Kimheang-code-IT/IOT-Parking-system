@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     gate_camera_fallback_plate: str = "WK-SIM01"
     gate_receipt_dir: str = "data/receipts"
     gate_auto_mock_payment: bool = True
+    gate_exit_use_fifo: bool = True
 
     @model_validator(mode="after")
     def set_callback_url(self) -> "Settings":

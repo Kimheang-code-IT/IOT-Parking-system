@@ -6,14 +6,16 @@ from sqlalchemy.orm import Session
 from app.models.bank_settings import BankSettings
 from app.models.invoice import Invoice
 from app.models.parking_session import ParkingSession
-from app.schemas.payment import ActiveSessionOut, BankInfoOut, PaymentVerifyOut, PaymentWebhookIn
+from app.schemas.payment import ActiveSessionOut, BankInfoOut, PaymentVerifyOut, PaymentWebhookIn, PaymentStatusOut
 from app.services.invoice_service import InvoiceService
 from app.services.parking_service import ParkingService
 from app.services.plate_service import normalize_plate
 from app.utils.datetime_utils import utc_now
+from app.utils.exit_verify_utils import normalize_verify_hash_scan
 from app.utils.id_generator import next_transaction_ref
 from app.core.parking_revision import bump_parking_revision
 from app.models.payment_transaction import PaymentTransaction
+from app.services.gate_exit_auto_service import GateExitAutoService
 
 
 class PaymentService:
@@ -22,7 +24,7 @@ class PaymentService:
         self.parking_service = ParkingService(db)
         self.invoice_service = InvoiceService(db)
 
-    def get_active_session(self, plate: str | None) -> ActiveSessionOut | None:
+    def get_active_session(self, plate: str | None, verify_hash: str | None = None) -> ActiveSessionOut | None:
         if not plate:
             session = (
                 self.db.query(ParkingSession)
@@ -36,7 +38,31 @@ class PaymentService:
         data = self.parking_service.active_session_card(plate)
         if not data:
             return None
+        if verify_hash:
+            self._assert_verify_hash(data, verify_hash)
         return ActiveSessionOut.model_validate(data)
+
+    def get_payment_status(self, invoice_id: str, verify_hash: str) -> PaymentStatusOut | None:
+        invoice = self.invoice_service.get_by_id(invoice_id.strip())
+        if not invoice:
+            return None
+        self._assert_verify_hash(
+            {
+                "verifyHash": invoice.exit_verify_hash,
+                "plateNumber": invoice.license_plate,
+            },
+            verify_hash,
+        )
+        paid = (invoice.status or "").lower() == "paid"
+        amount = float(invoice.amount or 0)
+        return PaymentStatusOut(
+            paid=paid,
+            payment_status=invoice.status,
+            plate_number=invoice.license_plate,
+            amount=amount,
+            invoice_id=invoice.id,
+            can_exit=paid,
+        )
 
     def get_bank_info(self) -> BankInfoOut:
         row = self.db.query(BankSettings).first()
@@ -50,6 +76,7 @@ class PaymentService:
         amount: float,
         payment_method: str,
         invoice_id: str | None,
+        verify_hash: str | None = None,
     ) -> PaymentVerifyOut:
         plate = normalize_plate(plate_number)
         session = self.parking_service.get_active_by_plate(plate)
@@ -69,6 +96,15 @@ class PaymentService:
 
         if not invoice:
             return PaymentVerifyOut(success=False, message="Pending invoice not found.")
+
+        if verify_hash:
+            self._assert_verify_hash(
+                {
+                    "verifyHash": invoice.exit_verify_hash,
+                    "plateNumber": invoice.license_plate,
+                },
+                verify_hash,
+            )
 
         if session.fee_amount is not None:
             expected = float(session.fee_amount)
@@ -98,6 +134,7 @@ class PaymentService:
         invoice.amount = Decimal(str(amount))
         self.invoice_service.mark_paid(invoice, payment_method, tx_ref)
         self._save_transaction(session.id, plate, amount, payment_method, True, "Payment verified successfully.", tx_ref)
+        GateExitAutoService(self.db).open_after_payment(invoice.id)
         self.db.commit()
         bump_parking_revision()
 
@@ -165,6 +202,7 @@ class PaymentService:
             "Payment confirmed via webhook.",
             tx_ref,
         )
+        GateExitAutoService(self.db).open_after_payment(invoice.id)
         self.db.commit()
         bump_parking_revision()
         return PaymentVerifyOut(
@@ -172,6 +210,15 @@ class PaymentService:
             message="Payment confirmed via webhook.",
             transaction_ref=tx_ref,
         )
+
+    @staticmethod
+    def _assert_verify_hash(data: dict, verify_hash: str) -> None:
+        normalized = normalize_verify_hash_scan(verify_hash) or verify_hash.strip().upper()
+        stored = (data.get("verifyHash") or "").strip().upper()
+        if not stored:
+            raise ValueError("No verification code on invoice.")
+        if normalized != stored:
+            raise ValueError("Verification code does not match this plate.")
 
     @staticmethod
     def _simulate_gateway_success(payment_method: str, amount: float) -> bool:

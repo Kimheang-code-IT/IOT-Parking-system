@@ -18,11 +18,13 @@ from app.schemas.gate import (
     GateTriggerOut,
 )
 from app.schemas.payment import PaymentWebhookIn
+from app.services.exit_queue_service import ExitQueueService
 from app.services.gate_camera_service import GateCameraService
 from app.services.gate_lane_service import GateLaneService
 from app.services.gate_receipt_printer import GateReceiptPrinter
 from app.services.invoice_service import InvoiceService
 from app.services.payment_service import PaymentService
+from app.services.plate_service import normalize_plate
 from app.utils.exit_verify_utils import (
     ExitBarcodePayload,
     parse_exit_barcode,
@@ -86,41 +88,57 @@ class GateTriggerService:
         )
 
     def exit_trigger(self, body: GateExitTriggerIn) -> GateTriggerOut:
+        if body.complete_after_payment and body.invoice_id:
+            return self._exit_complete_after_payment(body)
+
         use_cam = body.use_camera and body.source in ("camera", "simulator")
 
         try:
-            scan = self._resolve_exit_barcode(body, use_cam=use_cam)
+            if self.settings.gate_exit_use_fifo:
+                plate, invoice_id, verify_hash = self._resolve_exit_fifo()
+            else:
+                scan = self._resolve_exit_barcode(body, use_cam=use_cam)
+                verify_hash = scan.verify_hash
+                plate = scan.license_plate
+                invoice_id = scan.invoice_id or None
         except ValueError as exc:
             return GateTriggerOut(success=False, message=str(exc))
 
-        verify_hash = scan.verify_hash
-        plate = scan.license_plate
-        invoice_id = scan.invoice_id or None
-
-        invoice = InvoiceService(self.db).get_by_id(invoice_id) if invoice_id else None
-        if not invoice:
-            invoice = InvoiceService(self.db).get_by_verify_hash(verify_hash)
-        if not invoice:
-            return GateTriggerOut(success=False, message="Invalid exit barcode — invoice not found.")
-
-        if scan.license_plate and scan.invoice_id:
-            session = ParkingService(self.db).get_by_id(invoice.session_id)
-            if not session:
-                return GateTriggerOut(success=False, message="Parking session not found.")
-            err = validate_exit_barcode_against_invoice(
-                scan,
-                invoice_id=invoice.id,
-                license_plate=invoice.license_plate,
-                verify_hash=invoice.exit_verify_hash or "",
-                session_id=session.id,
-                secret=self.settings.exit_verify_secret,
-            )
-            if err:
-                return GateTriggerOut(success=False, message=err)
-            plate = scan.license_plate
-            invoice_id = invoice.id
-            verify_hash = (invoice.exit_verify_hash or scan.verify_hash).strip().upper()
+        if self.settings.gate_exit_use_fifo:
+            invoice = InvoiceService(self.db).get_by_id(invoice_id) if invoice_id else None
+            if not invoice:
+                return GateTriggerOut(success=False, message="FIFO exit — invoice not found.")
         else:
+            scan = ExitBarcodePayload(license_plate=plate, invoice_id=invoice_id or "", verify_hash=verify_hash)
+            invoice = InvoiceService(self.db).get_by_id(invoice_id) if invoice_id else None
+            if not invoice:
+                invoice = InvoiceService(self.db).get_by_verify_hash(verify_hash)
+            if not invoice:
+                return GateTriggerOut(success=False, message="Invalid exit barcode — invoice not found.")
+
+            if scan.license_plate and scan.invoice_id:
+                session = ParkingService(self.db).get_by_id(invoice.session_id)
+                if not session:
+                    return GateTriggerOut(success=False, message="Parking session not found.")
+                err = validate_exit_barcode_against_invoice(
+                    scan,
+                    invoice_id=invoice.id,
+                    license_plate=invoice.license_plate,
+                    verify_hash=invoice.exit_verify_hash or "",
+                    session_id=session.id,
+                    secret=self.settings.exit_verify_secret,
+                )
+                if err:
+                    return GateTriggerOut(success=False, message=err)
+                plate = scan.license_plate
+                invoice_id = invoice.id
+                verify_hash = (invoice.exit_verify_hash or scan.verify_hash).strip().upper()
+            else:
+                plate = plate or invoice.license_plate
+                invoice_id = invoice.id
+                verify_hash = (invoice.exit_verify_hash or verify_hash).strip().upper()
+
+        if self.settings.gate_exit_use_fifo:
             plate = plate or invoice.license_plate
             invoice_id = invoice.id
             verify_hash = (invoice.exit_verify_hash or verify_hash).strip().upper()
@@ -148,6 +166,25 @@ class GateTriggerService:
 
         if body.mock_payment and invoice_id:
             self._mock_pay(invoice_id, amount)
+
+        if body.defer_gate_open:
+            inv = self.db.get(Invoice, invoice_id) if invoice_id else None
+            paid = inv is not None and (inv.status or "").lower() == "paid"
+            if not paid:
+                return GateTriggerOut(
+                    success=True,
+                    message=f"Exit ready for {plate}. Pay ${amount:.2f} on the dashboard — gate opens after payment.",
+                    verify_hash=verify_hash,
+                    plate_number=plate,
+                    invoice_id=invoice_id,
+                    session_id=session_id,
+                    amount=amount,
+                    payment_status="Pending",
+                    payment_pending=True,
+                    gate_command="EXIT_PENDING",
+                    auto_close_seconds=body.auto_close_seconds,
+                    execute_on_device=body.source == "simulator",
+                )
 
         if body.wait_for_payment:
             paid = self._wait_until_paid(invoice_id, body.wait_payment_seconds)
@@ -189,7 +226,7 @@ class GateTriggerService:
         bump_parking_revision()
         return GateTriggerOut(
             success=True,
-            message=f"Exit approved for {plate}.",
+            message=f"Exit approved for {plate}. Gate open — closes in {body.auto_close_seconds}s.",
             plate_number=plate,
             invoice_id=invoice_id,
             session_id=session_id,
@@ -200,6 +237,83 @@ class GateTriggerService:
             auto_close_seconds=body.auto_close_seconds,
             execute_on_device=final.execute_on_device,
         )
+
+    def _exit_complete_after_payment(self, body: GateExitTriggerIn) -> GateTriggerOut:
+        invoice = InvoiceService(self.db).get_by_id(body.invoice_id or "")
+        if not invoice:
+            return GateTriggerOut(success=False, message="Invoice not found.")
+        if (invoice.status or "").lower() != "paid":
+            return GateTriggerOut(
+                success=False,
+                message="Payment required before exit gate opens.",
+                invoice_id=invoice.id,
+                plate_number=invoice.license_plate,
+                amount=float(invoice.amount or 0),
+                payment_status=invoice.status,
+                payment_pending=True,
+                gate_command="EXIT_DENIED",
+            )
+
+        plate = invoice.license_plate
+        verify_hash = (invoice.exit_verify_hash or "").strip().upper()
+        target = "GATE_SIM_01" if body.source == "simulator" else body.target_device
+        final = self.lane.process_exit(
+            GateExitProcessIn.model_validate(
+                {
+                    "verifyHash": verify_hash,
+                    "licensePlate": plate,
+                    "invoiceId": invoice.id,
+                    "source": body.source,
+                    "targetDevice": target,
+                    "requirePaid": True,
+                }
+            )
+        )
+        if not final.success:
+            return GateTriggerOut(
+                success=False,
+                message=final.message,
+                plate_number=plate,
+                invoice_id=invoice.id,
+                payment_status=final.gate_command.payment_status if final.gate_command else invoice.status,
+                gate_command="EXIT_DENIED",
+                execute_on_device=final.execute_on_device,
+            )
+
+        bump_parking_revision()
+        amount = float(final.gate_command.amount or invoice.amount or 0)
+        return GateTriggerOut(
+            success=True,
+            message=f"Exit approved for {plate}. Gate open — closes in {body.auto_close_seconds}s.",
+            verify_hash=verify_hash,
+            plate_number=plate,
+            invoice_id=invoice.id,
+            session_id=final.gate_command.session_id,
+            amount=amount,
+            payment_status="Paid",
+            payment_pending=False,
+            gate_command="EXIT_APPROVED",
+            auto_close_seconds=body.auto_close_seconds,
+            execute_on_device=final.execute_on_device,
+        )
+
+    def _resolve_exit_fifo(self) -> tuple[str, str, str]:
+        """FIFO exit: oldest active session — no camera/OCR at exit lane."""
+        queue = ExitQueueService(self.db)
+        fifo_session = queue.peek_fifo()
+        if not fifo_session:
+            raise ValueError("No vehicle waiting to exit (FIFO queue empty).")
+
+        invoice = queue.invoice_for_session(fifo_session)
+        if not invoice:
+            raise ValueError("Exit — no invoice for oldest parked vehicle.")
+
+        fifo_plate = normalize_plate(fifo_session.license_plate)
+        verify_hash = (invoice.exit_verify_hash or "").strip().upper()
+        if not verify_hash:
+            raise ValueError("Exit — missing verify code on invoice.")
+
+        return fifo_plate, invoice.id, verify_hash
 
     def _resolve_exit_barcode(self, body: GateExitTriggerIn, *, use_cam: bool) -> ExitBarcodePayload:
         if body.exit_barcode and body.exit_barcode.strip():

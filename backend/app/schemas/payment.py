@@ -12,6 +12,7 @@ class ActiveSessionOut(CamelModel):
     invoice_id: str | None = Field(default=None, alias="invoiceId")
     session_id: str | None = Field(default=None, alias="sessionId")
     payment_status: str | None = Field(default=None, alias="paymentStatus")
+    verify_hash: str | None = Field(default=None, alias="verifyHash")
 
 
 class PaymentVerifyIn(CamelModel):
@@ -19,6 +20,7 @@ class PaymentVerifyIn(CamelModel):
     amount: float
     payment_method: str = Field(alias="paymentMethod")
     invoice_id: str | None = Field(default=None, alias="invoiceId")
+    verify_hash: str | None = Field(default=None, alias="verifyHash")
 
 
 class PaymentVerifyOut(CamelModel):
@@ -28,12 +30,26 @@ class PaymentVerifyOut(CamelModel):
     transaction_ref: str | None = Field(default=None, alias="transactionRef")
 
 
+class PaymentStatusOut(CamelModel):
+    paid: bool
+    payment_status: str = Field(alias="paymentStatus")
+    plate_number: str = Field(alias="plateNumber")
+    amount: float
+    invoice_id: str = Field(alias="invoiceId")
+    can_exit: bool = Field(alias="canExit")
+
+
 class PaymentWebhookIn(CamelModel):
     invoice_id: str = Field(alias="invoiceId")
     amount: float
     payment_method: str = Field(default="KHQR", alias="paymentMethod")
     transaction_ref: str | None = Field(default=None, alias="transactionRef")
     success: bool = True
+
+
+class PaymentConfigOut(CamelModel):
+    mock_only: bool = Field(default=True, alias="mockOnly")
+    use_aba_mock: bool = Field(default=True, alias="useAbaMock")
 
 
 class BankInfoOut(CamelModel):

@@ -11,6 +11,7 @@ export interface ActiveVehicle {
   invoiceId?: string
   sessionId?: string
   paymentStatus?: string
+  verifyHash?: string
 }
 
 export interface BankInfo {
@@ -26,6 +27,20 @@ export interface PaymentVerifyResult {
   transactionRef?: string
 }
 
+export interface PaymentStatus {
+  paid: boolean
+  paymentStatus: string
+  plateNumber: string
+  amount: number
+  invoiceId: string
+  canExit: boolean
+}
+
+export interface PaymentConfig {
+  mockOnly: boolean
+  useAbaMock: boolean
+}
+
 export type { AbaQrResponse, AbaPayStatus } from '~/composables/usePaymentApi'
 
 export async function fetchAbaQr(
@@ -39,9 +54,10 @@ export async function fetchAbaQr(
 
 export async function fetchActiveVehicle(
   plateNumber?: string,
+  verifyHash?: string,
   signal?: AbortSignal
 ): Promise<ActiveVehicle> {
-  return usePaymentApi().getActiveSession(plateNumber, signal)
+  return usePaymentApi().getActiveSession(plateNumber, verifyHash, signal)
 }
 
 export async function verifyPayment(
@@ -49,11 +65,24 @@ export async function verifyPayment(
   amount: number,
   paymentMethod: string = 'ABA PAY',
   signal?: AbortSignal,
-  invoiceId?: string
+  invoiceId?: string,
+  verifyHash?: string
 ): Promise<PaymentVerifyResult> {
-  return usePaymentApi().verifyPayment({ plateNumber, amount, paymentMethod, invoiceId }, signal)
+  return usePaymentApi().verifyPayment({ plateNumber, amount, paymentMethod, invoiceId, verifyHash }, signal)
 }
 
 export async function fetchBankInfo(signal?: AbortSignal): Promise<BankInfo> {
   return usePaymentApi().getBankInfo(signal)
+}
+
+export async function fetchPaymentConfig(signal?: AbortSignal): Promise<PaymentConfig> {
+  return usePaymentApi().getPaymentConfig(signal)
+}
+
+export async function fetchPaymentStatus(
+  invoiceId: string,
+  verifyHash: string,
+  signal?: AbortSignal
+): Promise<PaymentStatus> {
+  return usePaymentApi().getPaymentStatus(invoiceId, verifyHash, signal)
 }

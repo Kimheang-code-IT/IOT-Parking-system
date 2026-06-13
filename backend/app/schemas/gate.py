@@ -63,7 +63,7 @@ class GateEntryTriggerIn(CamelModel):
 
 
 class GateExitTriggerIn(CamelModel):
-    """One button exit — scan ticket barcode (plate|invoice|hash), pay, open gate."""
+    """Exit button — FIFO queue + wait for payment, then open gate (no exit-lane OCR)."""
 
     source: Literal["camera", "simulator"] = "simulator"
     use_camera: bool = Field(default=True, alias="useCamera")
@@ -79,7 +79,22 @@ class GateExitTriggerIn(CamelModel):
     mock_payment: bool = Field(default=False, alias="mockPayment")
     wait_for_payment: bool = Field(default=True, alias="waitForPayment")
     wait_payment_seconds: int = Field(default=120, alias="waitPaymentSeconds")
-    auto_close_seconds: int = Field(default=60, alias="autoCloseSeconds")
+    auto_close_seconds: int = Field(default=20, alias="autoCloseSeconds")
+    defer_gate_open: bool = Field(
+        default=False,
+        alias="deferGateOpen",
+        description="FIFO/OCR verify + fee only — return pending payment without opening gate.",
+    )
+    complete_after_payment: bool = Field(
+        default=False,
+        alias="completeAfterPayment",
+        description="Open exit gate when invoice is already paid (IoT polls payment first).",
+    )
+    invoice_id: str | None = Field(
+        default=None,
+        alias="invoiceId",
+        description="Invoice from prepare phase — used with completeAfterPayment.",
+    )
 
 
 class GateTriggerOut(CamelModel):

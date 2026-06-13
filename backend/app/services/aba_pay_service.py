@@ -1,6 +1,4 @@
 import base64
-import hashlib
-import hmac
 import io
 import json
 import logging
@@ -13,6 +11,7 @@ import httpx
 import qrcode
 from PIL import Image, ImageDraw
 
+from app.services.aba_payway_model import AbaPaywayQrRequest
 from app.core.config import get_settings
 from app.schemas.payment import AbaPayStatusOut, AbaQrOut
 
@@ -162,29 +161,31 @@ class AbaPayService:
         if self.settings.aba_pay_callback_url:
             callback_b64 = base64.b64encode(self.settings.aba_pay_callback_url.encode()).decode()
 
-        payload = {
-            "req_time": req_time,
-            "merchant_id": self.settings.aba_pay_merchant_id,
-            "tran_id": tran_id,
-            "amount": round(amount, 2),
-            "currency": self.settings.aba_pay_currency,
-            "purchase_type": "purchase",
-            "payment_option": self.settings.aba_pay_payment_option,
-            "items": items_b64,
-            "callback_url": callback_b64 or None,
-            "lifetime": self.settings.aba_pay_qr_lifetime_minutes,
-            "qr_image_template": self.settings.aba_pay_qr_template,
-            "first_name": "",
-            "last_name": "",
-            "email": "",
-            "phone": "",
-            "return_deeplink": None,
-            "custom_fields": None,
-            "return_params": None,
-            "payout": None,
-        }
-        payload["hash"] = self._build_hash(payload)
+        return_params = None
+        if invoice_id:
+            return_params = json.dumps({"invoiceId": invoice_id, "plateNumber": plate_number.upper()})
 
+        request = AbaPaywayQrRequest(
+            req_time=req_time,
+            merchant_id=self.settings.aba_pay_merchant_id,
+            tran_id=tran_id,
+            amount=round(amount, 2),
+            currency=self.settings.aba_pay_currency,
+            purchase_type="purchase",
+            payment_option=self.settings.aba_pay_payment_option,
+            items=items_b64,
+            callback_url=callback_b64 or None,
+            lifetime=self.settings.aba_pay_qr_lifetime_minutes,
+            qr_image_template=self.settings.aba_pay_qr_template,
+            first_name="",
+            last_name="",
+            email="",
+            phone="",
+            return_params=return_params,
+            hash="",
+        ).with_hash(self.settings.aba_pay_api_key)
+
+        payload = request.to_api_dict()
         url = f"{self.settings.aba_pay_api_url.rstrip('/')}/api/payment-gateway/v1/payments/generate-qr"
         with httpx.Client(timeout=30.0) as client:
             response = client.post(url, json=payload, headers={"Content-Type": "application/json"})
@@ -198,52 +199,23 @@ class AbaPayService:
                 status.get("trace_id"),
             )
 
+        qr_string = data.get("qrString") or data.get("qr_string") or ""
+        qr_image = data.get("qrImage") or data.get("qr_image") or ""
         bank_logo = self._bank_logo_data_url()
         return AbaQrOut(
-            qr_string=data["qrString"],
-            qr_image=data["qrImage"],
+            qr_string=qr_string,
+            qr_image=qr_image,
             bank_logo=bank_logo,
             logo_embedded=True,
-            abapay_deeplink=data.get("abapay_deeplink"),
-            app_store=data.get("app_store"),
-            play_store=data.get("play_store"),
+            abapay_deeplink=data.get("abapay_deeplink") or data.get("abapayDeeplink"),
+            app_store=data.get("app_store") or data.get("appStore"),
+            play_store=data.get("play_store") or data.get("playStore"),
             amount=float(data.get("amount", amount)),
             currency=data.get("currency", self.settings.aba_pay_currency),
             tran_id=tran_id,
             status=AbaPayStatusOut(
                 code=str(status.get("code", "0")),
                 message=status.get("message", "Success."),
-                trace_id=status.get("trace_id"),
+                trace_id=status.get("trace_id") or status.get("traceId"),
             ),
         )
-
-    def _build_hash(self, payload: dict) -> str:
-        amount_str = str(payload["amount"])
-        parts = [
-            payload["req_time"],
-            payload["merchant_id"],
-            payload["tran_id"],
-            amount_str,
-            payload.get("items") or "",
-            payload.get("first_name") or "",
-            payload.get("last_name") or "",
-            payload.get("email") or "",
-            payload.get("phone") or "",
-            payload.get("purchase_type") or "",
-            payload.get("payment_option") or "",
-            payload.get("callback_url") or "",
-            payload.get("return_deeplink") or "",
-            payload.get("currency") or "",
-            payload.get("custom_fields") or "",
-            payload.get("return_params") or "",
-            payload.get("payout") or "",
-            str(payload.get("lifetime") or ""),
-            payload.get("qr_image_template") or "",
-        ]
-        b4hash = "".join(parts)
-        digest = hmac.new(
-            self.settings.aba_pay_api_key.encode(),
-            b4hash.encode(),
-            hashlib.sha512,
-        ).digest()
-        return base64.b64encode(digest).decode()
