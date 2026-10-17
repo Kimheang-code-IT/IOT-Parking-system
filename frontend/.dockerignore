@@ -1,0 +1,23 @@
+# Docker build context exclusions (frontend image)
+node_modules/
+.nuxt/
+.output/
+dist/
+.nitro/
+.cache/
+
+# Local env / logs (the production API URL comes from compose runtime env)
+.env
+.env.*
+!.env.example
+*.log
+npm-debug.log*
+.pnpm-debug.log*
+
+# Git / editors
+.git/
+.gitignore
+.vscode/
+.idea/
+
+docs/

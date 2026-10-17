@@ -1,0 +1,9 @@
+# Real environment (contains secrets) — never commit
+.env
+
+# Database backups written by scripts/backup-db.ps1
+backups/
+
+# Local overrides / logs
+docker-compose.override.yaml
+*.log

@@ -5,6 +5,8 @@ from app.models.invoice import Invoice
 from app.models.iot_device import IotDevice
 from app.models.parking_session import ParkingSession
 from app.models.payment_transaction import PaymentTransaction
+from app.models.rfid_card import RfidCard
+from app.models.rfid_scan_event import RfidScanEvent
 
 __all__ = [
     "BankSettings",
@@ -14,4 +16,6 @@ __all__ = [
     "IotDevice",
     "ParkingSession",
     "PaymentTransaction",
+    "RfidCard",
+    "RfidScanEvent",
 ]

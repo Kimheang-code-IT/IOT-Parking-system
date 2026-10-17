@@ -18,22 +18,29 @@ def run_schema_migrations() -> None:
         return
 
     inspector = inspect(engine)
-    if "invoices" not in inspector.get_table_names():
-        return
+    tables = inspector.get_table_names()
 
-    columns = {col["name"] for col in inspector.get_columns("invoices")}
-    if "exit_verify_hash" not in columns:
-        with engine.begin() as conn:
-            conn.execute(text("ALTER TABLE invoices ADD COLUMN exit_verify_hash VARCHAR(32)"))
-            conn.execute(
-                text(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS ix_invoices_exit_verify_hash "
-                    "ON invoices (exit_verify_hash)"
+    if "invoices" in tables:
+        columns = {col["name"] for col in inspector.get_columns("invoices")}
+        if "exit_verify_hash" not in columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE invoices ADD COLUMN exit_verify_hash VARCHAR(32)"))
+                conn.execute(
+                    text(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS ix_invoices_exit_verify_hash "
+                        "ON invoices (exit_verify_hash)"
+                    )
                 )
-            )
-        logger.info("Added invoices.exit_verify_hash column")
+            logger.info("Added invoices.exit_verify_hash column")
 
-    _backfill_exit_verify_hashes(settings.exit_verify_secret)
+        _backfill_exit_verify_hashes(settings.exit_verify_secret)
+
+    if "device_commands" in tables:
+        command_columns = {col["name"] for col in inspector.get_columns("device_commands")}
+        if "expires_at" not in command_columns:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE device_commands ADD COLUMN expires_at DATETIME"))
+            logger.info("Added device_commands.expires_at column")
 
 
 def _backfill_exit_verify_hashes(secret: str) -> None:

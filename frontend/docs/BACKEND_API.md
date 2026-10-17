@@ -1,5 +1,13 @@
 # IOT Parking — FastAPI Backend Spec
 
+> **Status:** implemented (July 2026 revision). The camera/OpenCV OCR entry path
+> and the Wokwi MicroPython simulator were removed; entry/exit identity is the
+> **RC522 RFID card** handled by `backend/app/routers/rfid.py` +
+> `backend/app/services/rfid_service.py` (ESP32 firmware in `iot/`). This
+> document describes the API the Nuxt frontend consumes; see
+> `backend/docs/IOT_DEVICES.md` for the device protocol and the root
+> `README.md` for run instructions.
+
 This document is derived from the Nuxt frontend (`app/data/*`, composables, and pages). Use it to implement a FastAPI backend that matches what the UI already expects.
 
 **Default base URL (frontend):** `http://localhost:8000`  
@@ -291,6 +299,50 @@ GET /api/payment/bank-info
 
 ---
 
+### RFID cards, scans and gate activity (`/rfid` page)
+
+Implemented in `app/pages/rfid.vue` + `app/data/rfid.ts` +
+`app/composables/useRfidApi.ts`.
+
+```
+GET /api/rfid/cards?search=&status=&page=&limit=
+```
+
+**Response `200`:** `{ "data": [{ "cardUid", "licensePlate", "vehicleType", "label", "status", "lastUsedAt", "createdAt", "updatedAt" }], "total": n }`
+
+```
+POST /api/rfid/cards
+```
+
+**Body:** `{ "cardUid": "04A1B2C3", "licensePlate": "2A-1234", "vehicleType": "Car", "label": "optional" }`
+→ `200` card object, `409` when the UID already exists, `400` invalid UID.
+
+```
+POST /api/rfid/cards/{card_uid}
+```
+
+**Body:** `{ "licensePlate"?, "vehicleType"?, "label"?, "status"? }` → `200` card, `404` unknown.
+
+```
+GET /api/rfid/scans?cardUid=&gate=entry|exit&accepted=true|false&page=&limit=
+```
+
+**Response `200`:** `{ "data": [{ "id", "cardUid", "gate", "licensePlate", "sessionId", "invoiceId", "accepted", "reason", "createdAt" }], "total": n }`
+
+```
+GET /api/rfid/gate-activity?deviceCode=&limit=
+```
+
+**Response `200`:** `{ "commands": [{ "commandId", "deviceCode", "command", "status", "createdAt", "deliveredAt", "ackedAt", "expiresAt", "message" }] }`
+where `status` ∈ `pending | delivered | acked | failed | expired`.
+
+Card-management endpoints require `x-rfid-admin-token` when `RFID_ADMIN_TOKEN`
+is set in the backend `.env` (empty = open, local dev only). Device scan
+endpoints (`POST /api/rfid/entry-scan`, `/api/rfid/exit-scan`) are for the ESP32
+firmware only and use `x-device-code` / `x-device-token`.
+
+---
+
 ### Dashboard
 
 ```
@@ -471,6 +523,8 @@ erDiagram
 | Parking types/columns/mock | `app/data/parking.ts` |
 | Invoice types/columns/mock | `app/data/invoice.ts` |
 | Payment / bank mock | `app/data/payment.ts` |
+| RFID cards/scans/activity | `app/data/rfid.ts` |
 | Dashboard mock | `app/data/dashboard.ts` |
 | Table query params | `app/composables/table/useTableQuery.ts` |
 | API base URL toggle | `app/composables/useApiConfig.ts` |
+| Live refresh (revision polling) | `app/composables/useParkingLiveSync.ts` |

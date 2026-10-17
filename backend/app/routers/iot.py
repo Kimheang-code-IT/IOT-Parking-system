@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.parking_revision import bump_parking_revision
 from app.core.security import verify_iot_device
 from app.models.iot_device import IotDevice
 from app.schemas.iot import (
@@ -102,6 +103,7 @@ def poll_command(
         return None
     IotDeviceService(db).touch_last_seen(device)
     db.commit()
+    bump_parking_revision()
     payload = GateCommandService.payload(row)
     return DeviceCommandPollOut(
         commandId=row.id,
@@ -133,6 +135,7 @@ def ack_command(
         message=body.detail or "Command acknowledged.",
     )
     db.commit()
+    bump_parking_revision()
     return {"success": True, "message": "Acknowledged."}
 
 
@@ -154,9 +157,10 @@ def gate_event(
         license_plate=None,
         payload=body.model_dump(by_alias=True),
         success=True,
-        message=f"Gate event: {body.event}",
+        message=f"Gate event: {body.event}" + (f" — {body.detail}" if body.detail else ""),
     )
     db.commit()
+    bump_parking_revision()
     return {"success": True, "message": "Event recorded."}
 
 

@@ -1,0 +1,26 @@
+# iot/test
+
+Firmware unit tests (Unity) for `lib/parking_core` — no ESP32 or RFID hardware
+needed:
+
+```powershell
+cd iot
+pio test -e native
+```
+
+The `native` environment compiles the tests for your PC, so a host C++ compiler
+must be on `PATH`:
+
+- Windows: `winget install MartinStorsjo.LLVM-MinGW.UCRT` (per-user) or
+  MinGW-w64/MSYS2, then reopen the terminal.
+- Linux/macOS: `g++`/`clang++` from your package manager.
+
+Test file: `test_parking_logic/test_logic.cpp`.
+
+- `test_parking_logic` — UID formatting/normalization, duplicate-scan gate,
+  full entry/exit flows, authorization timeout, denial handling,
+  passage-blocked/ fault hold-open, approval latch + expiry, payment-pending
+  flow, and the "ultrasonic alone never opens the gate" safety rule.
+
+Running tests on the real ESP32 (`pio test -e entry_gate -t upload`) is
+possible but the native environment is faster for day-to-day work.

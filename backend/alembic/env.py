@@ -5,14 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.core.database import Base
-from app.models import (  # noqa: F401
-    BankSettings,
-    DeviceLog,
-    Invoice,
-    IotDevice,
-    ParkingSession,
-    PaymentTransaction,
-)
+from app import models  # noqa: F401  (registers every model on Base.metadata)
 
 config = context.config
 if config.config_file_name is not None:

@@ -40,6 +40,15 @@ const links = [[{
   onSelect: () => {
     open.value = false
   }
+},
+{
+  label: 'RFID',
+  icon: 'i-lucide-credit-card',
+  class:"mt-2 text-md",
+  to: '/rfid',
+  onSelect: () => {
+    open.value = false
+  }
 }]] satisfies NavigationMenuItem[][]
 
 </script>

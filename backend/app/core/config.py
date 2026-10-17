@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     rate_per_hour: float = 2.0
     minimum_fee: float = 1.0
     app_name: str = "IOT Parking API"
+    app_env: str = "development"  # development | production (logging/health label)
+    log_level: str = "DEBUG"  # DEBUG for local dev; production compose sets INFO
     payment_webhook_secret: str = "change-me-webhook-secret"
     exit_verify_secret: str = ""
     api_base_url: str = "http://localhost:8000"
@@ -43,17 +45,23 @@ class Settings(BaseSettings):
     # When true, bootstrap/seed adds sample sessions (off by default — use scripts/reset_db.py --demo)
     seed_demo_data: bool = False
 
-    gate_use_camera: bool = True
-    gate_camera_index: int = 0
-    gate_camera_warmup_ms: int = 1500
-    gate_camera_prepare_seconds: int = 10
-    gate_camera_scan_seconds: int = 30
-    gate_show_camera_preview: bool = True
-    gate_tesseract_cmd: str = ""
-    gate_camera_fallback_plate: str = "WK-SIM01"
+    # Thermal receipt (dev: saved to disk; see services/gate_receipt_printer.py)
     gate_receipt_dir: str = "data/receipts"
-    gate_auto_mock_payment: bool = True
-    gate_exit_use_fifo: bool = True
+
+    # RFID access control
+    # Duplicate-scan protection: a second accepted scan of the same card at the
+    # same gate inside this window is logged and answered with duplicate=true.
+    rfid_scan_cooldown_seconds: int = 8
+    # Optional shared secret for the card-management endpoints
+    # (GET/POST /api/rfid/cards, /api/rfid/scans, /api/rfid/gate-activity).
+    # Empty = open (local dev only). Set it in production and send header
+    # x-rfid-admin-token from the dashboard/reverse proxy.
+    rfid_admin_token: str = ""
+
+    # Gate commands older than this are expired server-side (safety: a stale
+    # "open gate" approval must never execute much later). Keep aligned with
+    # the firmware PARKING_COMMAND_VALIDITY_MS.
+    gate_command_timeout_seconds: int = 180
 
     @model_validator(mode="after")
     def set_callback_url(self) -> "Settings":
@@ -66,6 +74,19 @@ class Settings(BaseSettings):
     @property
     def is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def safe_database_url(self) -> str:
+        """Database URL with the password masked — safe for logs."""
+        try:
+            from sqlalchemy.engine.url import make_url
+
+            url = make_url(self.database_url)
+            if url.password:
+                url = url.set(password="***")
+            return url.render_as_string(hide_password=True)
+        except Exception:
+            return self.database_url.split("@")[-1] if "@" in self.database_url else self.database_url
 
     @property
     def sqlite_path(self) -> Path | None:
