@@ -26,6 +26,8 @@ class GateEventIn(CamelModel):
         "entry_gate_closed",
         "exit_car_passed",
         "exit_gate_closed",
+        "gate_fault",
     ]
     session_id: str | None = Field(default=None, alias="sessionId")
     command_id: str | None = Field(default=None, alias="commandId")
+    detail: str | None = None

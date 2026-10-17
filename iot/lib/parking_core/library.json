@@ -1,0 +1,10 @@
+{
+  "name": "parking_core",
+  "version": "1.0.0",
+  "description": "Pure C++ logic for the Smart IoT Parking ESP32 firmware (RFID UID handling, duplicate-scan gate, gate state machine). No Arduino dependencies so it can be unit-tested on the host with `pio test -e native`.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "flags": ["-std=gnu++11"]
+  }
+}

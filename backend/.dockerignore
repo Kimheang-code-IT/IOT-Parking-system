@@ -1,0 +1,27 @@
+# Docker build context exclusions (backend image)
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Never bake local state or secrets into images
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Git / editors
+.git/
+.gitignore
+.vscode/
+
+# Documentation is not needed inside the runtime image
+README.md
+docs/

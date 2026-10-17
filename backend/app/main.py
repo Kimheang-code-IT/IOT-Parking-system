@@ -16,7 +16,7 @@ from app.core.bootstrap import bootstrap_database
 from app.core.config import get_settings
 from app.core.database import engine
 from app.core.logging_config import setup_logging
-from app.routers import dashboard, gate, invoices, iot, parking, payment
+from app.routers import dashboard, gate, invoices, iot, parking, payment, rfid
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,9 +25,14 @@ limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_lim
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    setup_logging()
+    setup_logging(settings.log_level)
     bootstrap_database()
-    logger.info("Started %s [development] db=%s", settings.app_name, settings.database_url)
+    logger.info(
+        "Started %s [%s] db=%s",
+        settings.app_name,
+        settings.app_env,
+        settings.safe_database_url,
+    )
     yield
 
 
@@ -73,7 +78,7 @@ def health(request: Request):
     return {
         "status": "ok" if db_status == "ok" else "degraded",
         "service": settings.app_name,
-        "environment": "development",
+        "environment": settings.app_env,
         "database": db_status,
     }
 
@@ -83,4 +88,5 @@ app.include_router(invoices.router)
 app.include_router(payment.router)
 app.include_router(dashboard.router)
 app.include_router(iot.router)
+app.include_router(rfid.router)
 app.include_router(gate.router)

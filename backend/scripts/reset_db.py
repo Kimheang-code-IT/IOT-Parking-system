@@ -21,10 +21,13 @@ from app.core.bootstrap import bootstrap_database
 from app.core.config import get_settings
 from app.core.database import SessionLocal, engine
 from app.core.migrations import run_schema_migrations
+from app.models.device_command import DeviceCommand
 from app.models.device_log import DeviceLog
 from app.models.invoice import Invoice
 from app.models.parking_session import ParkingSession
 from app.models.payment_transaction import PaymentTransaction
+from app.models.rfid_card import RfidCard
+from app.models.rfid_scan_event import RfidScanEvent
 
 
 def _unlink_sqlite(path: Path) -> None:
@@ -39,11 +42,14 @@ def _clear_all_rows() -> None:
     db = SessionLocal()
     try:
         db.query(DeviceLog).delete()
+        db.query(DeviceCommand).delete()
+        db.query(RfidScanEvent).delete()
+        db.query(RfidCard).delete()
         db.query(PaymentTransaction).delete()
         db.query(Invoice).delete()
         db.query(ParkingSession).delete()
         db.commit()
-        print("  Cleared sessions, invoices, payments, and device logs.")
+        print("  Cleared sessions, invoices, payments, commands, RFID cards/scans, and device logs.")
     finally:
         db.close()
 

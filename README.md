@@ -1,49 +1,66 @@
 # IOT Parking System
 
-Smart parking management — IoT entry/exit gates, PC camera plate scanning, invoice barcode verification, ABA KHQR payment, staff dashboard, and Wokwi ESP32 simulation.
+Smart parking management — **ESP32 RFID gates** (entry/exit), FastAPI backend with invoicing, **ABA KHQR payments**, a staff dashboard (Nuxt UI), and full test suites for firmware and backend.
 
 ---
 
 ## Overview
 
-The **IOT Parking System** automates a parking lot from entry to exit. A vehicle arrives at the **entry gate**: a computer camera reads the license plate, FastAPI creates a parking session and invoice, and a thermal printer issues a ticket with a **barcode** (`verifyHash`). FastAPI sends **ENTRY_APPROVED** to an ESP32, which opens the entry servo; after the car passes, a sensor (or operator button) closes the gate.
+The **IOT Parking System** automates a parking lot from entry to exit:
 
-While parked, staff use the **web dashboard** for occupancy, history, and billing. At **exit**, cameras scan the invoice barcode and the license plate; FastAPI verifies the ticket, plate, and **ABA payment** status. If approved, **EXIT_APPROVED** opens the exit gate; if payment fails or the plate does not match, the ESP32 shows an error (red LED + buzzer).
+1. **Entry** — a car triggers the approach sensor; the LCD asks the driver to **tap an RFID card**. The ESP32 posts the card UID to FastAPI; the backend resolves the registered plate, creates the parking session + invoice, saves the entry receipt, and queues **`ENTRY_APPROVED`**. The gate servo opens only then; a **passage safety sensor** watches the car cross and the gate closes.
+2. **Parking** — staff see occupancy, history, and invoices on the web dashboard. Cards are registered / blocked on the **RFID** page.
+3. **Exit** — the driver taps the same card at the exit gate: FastAPI finds the active session, **calculates the fee** and checks payment. The gate opens (**`EXIT_APPROVED`**) only after **ABA KHQR / verified payment**; if unpaid, the LCD shows the amount and the gate stays locked until payment completes.
 
 | Layer | Role | Users |
-|-------|------|--------|
-| **Edge (IoT)** | ESP32 servos, LCD, LEDs, buzzer, printers, barcode scanners, lane PC cameras | Drivers (indirect), lane hardware |
-| **Server** | FastAPI, SQLite, gate command queue, payment webhooks | Lane PC, ESP32, dashboard |
-| **Web dashboard** | Analytics, parking history, KHQR payment display, invoice reprint | Staff / admin |
+|-------|------|-------|
+| **Edge (IoT)** | ESP32 RFID gates: RC522 reader, servo, LCD, LEDs, ultrasonic sensors | Drivers (indirect), lane hardware |
+| **Server** | FastAPI, SQLite (PostgreSQL-ready), gate command queue, payment webhooks | ESP32 gates, dashboard |
+| **Web dashboard** | Cards, analytics, parking history, KHQR payment display, invoices | Staff / admin |
 
 **Design rules**
 
-- The dashboard does **not** open gates or print entry tickets — only IoT lanes and printers do.
-- Entry tickets are printed at **entry**; the **Payment** page shows KHQR only (no receipt UI).
+- The dashboard does **not** open gates — only the IoT gates execute gate commands (operators can open the exit gate via the device endpoint once the session is paid).
+- The ultrasonic sensor alone never opens a gate — authorization always comes from an RFID scan + the backend.
 - **Fee:** under 1 hour → $1.00 minimum; 1 hour or more → billed hours (rounded up) × $2.00/hour.
+- **Security:** an RFID card UID is an identifier, not a secret (MIFARE UIDs can be cloned). Fine for this local/educational system — not sufficient authentication for production use (see [Security notes](#security-notes)).
 
-**Simulator vs real hardware**
+---
 
-| | **Wokwi simulator** | **Real hardware** |
-|---|---------------------|-------------------|
-| Camera | **Two buttons** (entry / exit) simulate scans — Wokwi has no host webcam | USB webcam on lane PC + OCR |
-| Gate API | `POST /api/gate/*/process` with `source: "simulator"` | Same APIs with `source: "camera"` |
-| ESP32 project | `wokwi/parking-gate/` (MicroPython) | Same firmware on physical ESP32 |
-| Command delivery | Immediate on device + poll `GATE_SIM_01` | ESP polls `ENTRY_GATE_01` / `EXIT_GATE_01` |
+## Hardware & Wiring
+
+Full wiring guide and BOM: **[`iot/README.md`](iot/README.md)**.
+
+| Component | Pin (ESP32) | Note |
+|-----------|-------------|------|
+| HC-SR04 **approach sensor** TRIG / ECHO | 5 / 18 | existing wiring kept |
+| Gate **servo** signal | 13 | 50 Hz PWM, 5 V supply |
+| **Green / red LED** | 25 / 26 | gate state feedback |
+| **16x2 LCD** I²C SDA / SCL | 21 / 22 | addr `0x27` |
+| **RC522 RFID**: SS / SCK / MOSI / MISO / RST | 4 / 14 / 23 / 19 / 27 | **3.3 V only**, SPI remapped to avoid GPIO 5/18 |
+| HC-SR04 **passage safety sensor** TRIG / ECHO | 32 / 33 | fail-safe: gate never closes over a car |
+| LCD shows | `Scan card…`, `Checking card`, `Payment due $x.xx`, `Gate open`, `Access denied`, `FAILSAFE open` | |
 
 ---
 
 ## How to Run
 
-Open a terminal in the **repository root** (`IOT-Parking/`). Commands below assume **PowerShell** on Windows.
+> **Docker option:** `infrastructure/` contains a complete local stack
+> (PostgreSQL + FastAPI + Nuxt + nginx reverse proxy) — see
+> [`infrastructure/README.md`](infrastructure/README.md). Everything below is
+> the manual/dev workflow.
+
+Open a terminal in the **repository root** (`IOT-Parking/`). Commands assume **PowerShell** on Windows.
 
 ### Prerequisites
 
 | Tool | Notes |
 |------|--------|
-| Python **3.11+** | Backend + lane scripts |
+| Python **3.11+** | Backend + tests |
 | Node.js + **pnpm** | Dashboard (`frontend/`) |
-| **Wokwi** (optional) | VS Code extension or [wokwi.com](https://wokwi.com) + `wokwigw.exe` in `wokwigw_v2.0.1_Windows_64bit/` |
+| **PlatformIO** (VS Code extension or CLI) | ESP32 firmware (`iot/`) |
+| **Host C++ compiler** (optional) | `pio test -e native` on the PC, e.g. `winget install MartinStorsjo.LLVM-MinGW.UCRT` |
+| ESP32 DevKit + RC522 + servo + LCD + HC-SR04 ×2 | The physical gates |
 
 ### One-time setup
 
@@ -60,6 +77,10 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 cd ..\frontend
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 pnpm install
+
+cd ..\iot
+Copy-Item include\parking_secrets.example.h include\parking_secrets.h
+# edit include\parking_secrets.h: Wi-Fi, API LAN IP, device tokens
 ```
 
 ### Run commands (pick what you need)
@@ -68,19 +89,12 @@ Use **separate terminals** — keep each process running.
 
 | # | What | Command | Open in browser |
 |---|------|---------|-----------------|
-| **1** | **API** (required) | From repo root: `.\scripts\run_backend.ps1` — or from `backend/`: `.\scripts\run_dev.ps1` | http://127.0.0.1:8000/docs |
-| **2** | **Dashboard** (optional) | `cd frontend` → `pnpm dev` | http://localhost:3000 |
-| **3** | **Wokwi gateway** (sim only) | `.\wokwigw_v2.0.1_Windows_64bit\wokwigw.exe` | — (listens on port **9011**) |
-| **4** | **Wokwi sim** | **Start Simulation** → `cd wokwi\parking-gate` → `.\upload_to_wokwi.ps1` or `.\boot_esp32.ps1 -Upload` | **Wokwi Serial Monitor** (View → Output) |
+| **1** | **API** (required) | From repo root: `.\scripts\run_backend.ps1` — or from `backend/`: `uvicorn app.main:app --host 0.0.0.0 --port 8000` | http://127.0.0.1:8000/docs |
+| **2** | **Dashboard** | `cd frontend` → `pnpm dev` | http://localhost:3000 |
+| **3** | **Entry gate** | `cd iot` → `pio run -e entry_gate -t upload --upload-port COMx` | Serial monitor 115200 |
+| **4** | **Exit gate** | `cd iot` → `pio run -e exit_gate -t upload --upload-port COMy` | Serial monitor 115200 |
 
-**Minimal API only** (no UI, no Wokwi):
-
-```powershell
-cd IOT-Parking
-.\.venv\Scripts\Activate.ps1
-cd backend
-.\scripts\run_dev.ps1
-```
+Use `--host 0.0.0.0` so the ESP32s can reach the API over the LAN, and allow port **8000** through the Windows Firewall (private networks).
 
 **Health check:**
 
@@ -88,216 +102,22 @@ cd backend
 curl http://127.0.0.1:8000/health
 ```
 
-**Presentation deck only** (no server):
+### Demo without hardware
+
+Use **mock/simulated lanes** against the live API (no ESP32 required):
 
 ```powershell
-start index.html
+# Register a card (dashboard API)
+curl -X POST http://127.0.0.1:8000/api/rfid/cards -H "Content-Type: application/json" `
+  -d '{\"cardUid\":\"04A1B2C3\",\"licensePlate\":\"2A-1234\",\"vehicleType\":\"Car\"}'
+
+# Simulate an entry tap (device-authenticated)
+curl -X POST http://127.0.0.1:8000/api/rfid/entry-scan -H "Content-Type: application/json" `
+  -H "x-device-code: ENTRY_GATE_01" -H "x-device-token: secret-entry-token" `
+  -d '{\"deviceCode\":\"ENTRY_GATE_01\",\"cardUid\":\"04A1B2C3\"}'
 ```
 
-### ESP32 boot — show output on Serial Monitor
-
-**Where to look:** VS Code → **View → Output** → dropdown **Wokwi Serial Monitor** (not the Terminal tab).
-
-**One-time (firmware + upload tool):**
-
-```powershell
-cd IOT-Parking
-.\.venv\Scripts\Activate.ps1
-pip install mpremote==1.23
-
-cd wokwi\parking-gate
-.\download_firmware.ps1
-```
-
-**Boot sequence (each time you simulate):**
-
-| Step | Action |
-|------|--------|
-| 1 | VS Code: open `wokwi/parking-gate/diagram.json` → click **Start Simulation** (green play) |
-| 2 | Serial Monitor should show MicroPython banner and `>>>` |
-| 3 | Upload app + reboot ESP32: |
-
-```powershell
-cd wokwi\parking-gate
-.\upload_to_wokwi.ps1
-```
-
-Or upload + reset in one helper:
-
-```powershell
-.\boot_esp32.ps1 -Upload
-```
-
-**Reset only** (re-run `boot.py` + `main.py`, keep watching Serial Monitor):
-
-```powershell
-.\boot_esp32.ps1
-```
-
-**Manual mpremote** (simulation must be running on port **4000**):
-
-```powershell
-# Hard reset — boot messages appear in Wokwi Serial Monitor
-mpremote connect port:rfc2217://localhost:4000 reset
-
-# REPL in this PowerShell window (exit with Ctrl+])
-mpremote connect port:rfc2217://localhost:4000 repl
-```
-
-If upload fails: click **Wokwi Serial Monitor** → **Ctrl+C** → **Ctrl+A** → run `.\upload_to_wokwi.ps1` again.
-
-**Healthy boot log (example):**
-
-```text
-boot.py: MicroPython starting
-Booting...
-Import OK: i2c_lcd.I2cLcd
-I2C devices: [39]
-LCD: IOT Parking | LCD Working
-API online
-```
-
-### Wokwi buttons (after steps 1 + 3 + 4)
-
-| Button | Action |
-|--------|--------|
-| Green | Entry → session + receipt + open entry gate |
-| Blue | Exit → scan barcode flow + mock pay (if enabled) → open exit gate |
-
-Reset stuck sessions:
-
-```powershell
-cd wokwi\parking-gate
-.\reset_parking_db.ps1
-```
-
-### Test without hardware
-
-```powershell
-cd backend
-.\.venv\Scripts\Activate.ps1
-python -m scripts.test_integration
-powershell -File scripts\test_wokwi_flow.ps1
-```
-
-Lane PC (webcam) — API must already run on port **8000**:
-
-```powershell
-cd backend
-python devices/lane_workstation.py entry
-python devices/lane_workstation.py entry --plate 2A-1234
-python devices/lane_workstation.py exit --hash YOUR_VERIFY_HASH --plate WK-SIM01
-```
-
-### Stop
-
-Press **Ctrl+C** in each terminal (API, `pnpm dev`, `wokwigw.exe`, Wokwi simulation).
-
----
-
-## Technology Stack
-
-| Category | Technology | Version / Notes | Purpose |
-|----------|------------|-----------------|---------|
-| **Backend** | Python | 3.11+ | API and lane scripts |
-| **API** | FastAPI | ≥ 0.115 | REST + OpenAPI at `/docs` |
-| **Server** | Uvicorn | ≥ 0.32 | ASGI server |
-| **ORM** | SQLAlchemy | 2.x | Models and queries |
-| **Migrations** | Alembic | ≥ 1.14 | Optional schema migrations |
-| **Validation** | Pydantic | v2 | camelCase JSON schemas |
-| **Database** | SQLite | `backend/data/iot_parking.db` | Local dev database |
-| **Rate limit** | slowapi | ≥ 0.1.9 | Endpoint protection |
-| **HTTP client** | httpx | ≥ 0.27 | ABA PayWay calls |
-| **KHQR mock** | qrcode + Pillow | ≥ 7.4 | Dev payment QR images |
-| **Barcode** | python-barcode | ≥ 0.15 | Code128 on entry tickets |
-| **Frontend** | Nuxt | 4.x | Staff dashboard |
-| **UI** | Vue 3 + Nuxt UI | 4.x | Components and layout |
-| **Language** | TypeScript | 5.9+ | Typed frontend |
-| **Styling** | Tailwind CSS | 4.x | Utility CSS |
-| **Charts** | ECharts | 6.x | Dashboard graphs |
-| **Tables** | TanStack Vue Table | 8.x | Sortable data grids |
-| **Package manager** | pnpm | 10.x | Frontend deps |
-| **IoT MCU** | ESP32 | — | Entry + exit servos, LCD |
-| **IoT firmware** | MicroPython | Wokwi | `wokwi/parking-gate/main.py` |
-| **Simulation** | Wokwi | — | Full gate diagram + buttons |
-| **Lane PC** | Python | `devices/lane_workstation.py` | Real camera → API |
-
----
-
-## Project Structure
-
-```
-IOT-Parking/
-├── backend/
-│   ├── app/
-│   │   ├── main.py
-│   │   ├── core/                 # config, database, bootstrap
-│   │   ├── models/               # sessions, invoices, device_commands, iot_devices
-│   │   ├── schemas/
-│   │   ├── routers/              # parking, payment, invoices, dashboard, iot, gate
-│   │   ├── services/             # parking, gate lane, payment, ABA, IoT entry/exit
-│   │   └── utils/                # barcode, dates, IDs
-│   ├── devices/
-│   │   ├── lane_workstation.py   # PC camera mode → /api/gate/*
-│   │   ├── entry_station.py
-│   │   ├── exit_station.py
-│   │   └── client.py
-│   ├── scripts/                  # reset_db, seed, test_integration
-│   ├── docs/IOT_DEVICES.md       # Device headers reference
-│   └── data/                     # SQLite (gitignored)
-│
-├── frontend/
-│   └── app/
-│       ├── pages/                # /, /parking, /payment, /invoices
-│       ├── components/           # tables, KHQR card, invoice preview
-│       └── composables/
-│
-├── wokwi/
-│   └── parking-gate/             # Only IoT simulator — ESP32 + entry/exit servos + LCD
-│       ├── diagram.json
-│       ├── main.py               # MicroPython firmware
-│       └── wokwi.toml
-│
-├── wokwigw_v2.0.1_Windows_64bit/ # Wokwi Private IoT Gateway (wokwigw.exe)
-│
-├── index.html                    # Full-screen presentation (edit only this file)
-├── docs/images/                  # Slide photos: 01-welcome.jpg … 13-thankyou.jpg, team-1…4.jpg
-└── README.md                     # System documentation (this file)
-```
-
-### Backend services
-
-| Module | Responsibility |
-|--------|----------------|
-| `GateLaneService` | PC/simulator entry & exit → gate commands |
-| `GateCommandService` | Queue `ENTRY_APPROVED` / `EXIT_*` for ESP32 poll |
-| `IotEntryService` | Session + invoice + `printData` |
-| `IotExitService` | Barcode + plate verify, fee, gate events |
-| `PaymentService` | Active session, webhook, verify |
-| `AbaPayService` | KHQR generation (mock or PayWay) |
-| `ParkingService` / `ParkingFeeService` | Sessions and pricing |
-| `DashboardService` | Home page analytics |
-
-### Dashboard routes
-
-| Route | Purpose |
-|-------|---------|
-| `/` | KPIs, charts, occupancy |
-| `/parking` | Session history + filters |
-| `/payment` | Fee + ABA KHQR (no entry receipt) |
-| `/invoices` | List, preview, print receipts |
-
-### Database tables
-
-| Table | Purpose |
-|-------|---------|
-| `parking_sessions` | Visit while vehicle is inside (`Active` → `Completed`) |
-| `invoices` | Ticket; `exit_verify_hash` for barcode |
-| `device_commands` | Gate commands for ESP32 (`pending` → `delivered` → `acked`) |
-| `iot_devices` | `ENTRY_GATE_01`, `EXIT_GATE_01`, `GATE_SIM_01` |
-| `device_logs` | IoT audit trail |
-| `payment_transactions` | Payment audit |
-| `bank_settings` | Bank info on payment page |
+Or the full automated flows: `python -m scripts.test_integration` (see [Tests](#tests)).
 
 ---
 
@@ -305,39 +125,35 @@ IOT-Parking/
 
 ```mermaid
 flowchart TB
-    subgraph Entry["1 — Entry"]
-        E1[Car arrives] --> E2[PC camera OCR or Wokwi button]
-        E2 --> E3[POST /api/gate/entry/process]
-        E3 --> E4[Session + invoice + print ticket]
-        E4 --> E5[ENTRY_APPROVED → ESP32]
-        E5 --> E6[Open entry servo]
-        E6 --> E7[Car passes → close servo]
+    subgraph Entry["1 — Entry (RFID)"]
+        E1[Car arrives at entry] --> E2[Approach sensor detects car]
+        E2 --> E3[LCD: Scan card]
+        E3 --> E4[RC522 reads card UID]
+        E4 --> E5[POST /api/rfid/entry-scan]
+        E5 --> E6[Backend: card to plate, session + invoice + receipt]
+        E6 --> E7[ENTRY_APPROVED queued]
+        E7 --> E8[ESP32 polls command, opens servo]
+        E8 --> E9[Passage sensor sees car pass, gate closes]
     end
 
     subgraph Park["2 — Parked"]
         P1[Session Active]
-        P2[Dashboard: stats / parking / invoices]
+        P2[Dashboard: cards, stats, parking, invoices]
         P1 --- P2
     end
 
-    subgraph Exit["3 — Exit"]
-        X1[Scan invoice barcode + plate] --> X2[POST /api/gate/exit/process]
-        X2 --> X3{Paid + plate OK?}
-        X3 -->|No| X4[EXIT_DENIED — red LED + buzzer]
-        X3 -->|Yes| X5[EXIT_APPROVED → open exit servo]
-        X5 --> X6[Car passes → close servo]
+    subgraph Exit["3 — Exit (RFID + payment)"]
+        X1[Car at exit, LCD: Scan card] --> X2[POST /api/rfid/exit-scan]
+        X2 --> X3[Backend: active session + fee]
+        X3 --> X4{Paid?}
+        X4 -->|No| X5[LCD shows fee - gate locked]
+        X6[ABA KHQR webhook / dashboard verify] --> X4
+        X4 -->|Yes| X7[EXIT_APPROVED queued]
+        X7 --> X8[ESP32 opens exit servo]
     end
 
-    subgraph Pay["Payment at exit"]
-        Y1[KHQR on kiosk or Payment page]
-        Y2[ABA webhook → invoice Paid]
-        Y1 --> Y2
-        Y2 --> X3
-    end
-
-    E7 --> Park
+    E9 --> Park
     Park --> X1
-    X2 -.-> Y1
 ```
 
 ---
@@ -348,37 +164,32 @@ flowchart TB
 sequenceDiagram
     autonumber
     participant Car
-    participant Cam as PC camera or Wokwi button
+    participant ESP as ESP32 entry gate
     participant API as FastAPI
     participant DB as SQLite
-    participant ESP as ESP32 entry gate
-    participant Prt as Thermal printer
-    participant S as Entry servo
+    participant S as Servo
 
-    Car->>Cam: Arrive at entry
-    Cam->>API: POST /api/gate/entry/process
-    Note over Cam,API: plate, vehicleType, source camera or simulator
-
-    API->>API: OCR / validate plate
-    API->>DB: parking_sessions Active + invoices Pending
-    API->>DB: Queue ENTRY_APPROVED
-    API-->>Cam: printData with verifyHash + barcode
-
-    Cam->>Prt: Print ticket
+    Car->>ESP: Approach sensor detects car
+    ESP->>ESP: LCD "Scan card to enter"
+    Car->>ESP: RFID card tapped (RC522)
+    ESP->>API: POST /api/rfid/entry-scan (device auth)
+    API->>DB: rfid_cards lookup (status Active)
+    API->>DB: parking_sessions Active + invoices Pending + receipt file
+    API-->>ESP: authorized + sessionId/invoiceId
+    API->>DB: Queue ENTRY_APPROVED for ENTRY_GATE_01
     ESP->>API: GET /api/iot/commands/next
     API-->>ESP: ENTRY_APPROVED
     ESP->>S: Open gate 90°
-    ESP->>ESP: Green LED + LCD ENTRY OK
-
-    Car->>S: Drive through
-    ESP->>API: POST /api/iot/gate/event entry_car_passed
+    ESP->>API: POST /api/iot/commands/ack (completed)
+    Car->>ESP: Passage sensor sees the car cross
+    ESP->>API: POST /api/iot/gate/event entry_car_passed + entry_gate_closed
     ESP->>S: Close gate 0°
-    ESP->>API: POST /api/iot/commands/ack
 ```
 
-**Wokwi shortcut:** button **Scan entry plate** calls the same API with `source: simulator` and opens the servo immediately (`executeOnDevice: true`).
-
----
+- Unknown / blocked cards are denied with a reason on the LCD and logged in `rfid_scan_events`.
+- Duplicate taps are suppressed twice: on the firmware (scan gate) and on the backend (cooldown window).
+- A car whose card already has an **active session** gets the entry gate re-opened for that session instead of a duplicate session.
+- The thermal receipt (barcode + verify code) is saved to `backend/data/receipts/`; the customer keeps the entry ticket for the invoice.
 
 ## Exit Flow
 
@@ -386,35 +197,38 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant Car
-    participant Cam as PC camera or Wokwi buttons
-    participant API as FastAPI
     participant ESP as ESP32 exit gate
-    participant S as Exit servo
+    participant API as FastAPI
+    participant Bank as ABA KHQR / dashboard
+    participant S as Servo
 
-    Car->>Cam: Invoice barcode + license plate
-    Cam->>API: POST /api/gate/exit/process
-    Note over Cam,API: verifyHash + licensePlate, requirePaid true
+    Car->>ESP: Approach sensor detects car
+    ESP->>ESP: LCD "Scan card to exit"
+    Car->>ESP: RFID card tapped
+    ESP->>API: POST /api/rfid/exit-scan
+    API->>API: Active session by card plate + fee calculation
 
-    API->>API: Match invoice, plate, calculate fee
-
-    alt Not paid or plate mismatch
-        API-->>Cam: EXIT_DENIED
-        API->>ESP: Command EXIT_DENIED
-        ESP->>ESP: Red LED + buzzer
-    else Paid and verified
-        API-->>Cam: EXIT_APPROVED
-        ESP->>API: GET /api/iot/commands/next
-        ESP->>S: Open exit gate
-        Car->>S: Pass through
-        ESP->>API: gate event exit_car_passed
-        ESP->>S: Close gate
-        ESP->>API: commands/ack
+    alt Already paid
+        API->>API: Queue EXIT_APPROVED
+        API-->>ESP: authorized
+    else Payment pending
+        API-->>ESP: paymentPending + amount
+        ESP->>ESP: LCD "Payment due $x.xx"
+        Car->>Bank: Pay via ABA KHQR / Payment page
+        Bank->>API: POST /api/payment/webhook (invoice -> Paid)
+        API->>API: Queue EXIT_APPROVED automatically
     end
+
+    ESP->>API: GET /api/iot/commands/next
+    API-->>ESP: EXIT_APPROVED
+    ESP->>S: Open exit gate
+    ESP->>API: gate events + command ack
 ```
 
-**Wokwi:** press **Open exit** after entry (mock payment runs automatically).
-
----
+- The exit gate is **backend-controlled**: it opens on `EXIT_APPROVED` only, which is queued exclusively for paid/authorized sessions.
+- Payment paths: ABA KHQR webhook (`POST /api/payment/webhook`), dashboard Payment page verify (`POST /api/payment/verify`), or the dev mock helper (`POST /api/gate/exit/mock-payment`).
+- Operators can open the exit gate device-side (`POST /api/iot/open-gate`) only after the session is **Completed + Paid**.
+- Paid-first drivers can still tap at the gate: a recent paid invoice re-queues the approval (30-minute window).
 
 ## Payment Flow
 
@@ -422,144 +236,65 @@ sequenceDiagram
 sequenceDiagram
     autonumber
     participant Customer
-    participant UI as Payment page or exit kiosk
+    participant UI as Payment page
     participant API as FastAPI
     participant Bank as ABA Mobile
-    participant ESP as Exit ESP32
+    participant ESP as Exit gate ESP32
 
-    Note over API: Exit sets fee and invoice may be Pending
-
+    Customer->>UI: Plate + ticket verify code (or exit scan already set the fee)
     UI->>API: GET /api/payment/active-session
     API-->>UI: plate, duration, amount
-
     UI->>API: GET /api/payment/aba-qr
     API-->>UI: KHQR image
-
-    UI->>Customer: Show amount + QR
     Customer->>Bank: Pay in ABA app
     Bank->>API: POST /api/payment/webhook
-    Note over Bank,API: x-webhook-secret, invoiceId, success
-
-    API->>API: invoice Paid, session completed
-
-    ESP->>API: POST /api/gate/exit/process
-    API-->>ESP: EXIT_APPROVED
+    API->>API: invoice Paid, session Completed
+    API->>ESP: EXIT_APPROVED queued
     ESP->>ESP: Open exit servo
 ```
 
-**Development:** `POST /api/payment/verify` simulates a successful payment without a bank.
+**Development:** `POST /api/payment/verify` simulates a successful payment without a bank (`ABA_PAY_USE_MOCK=true` default).
 
 ---
 
-## Conclusions
+## Firmware (ESP32 / PlatformIO)
 
-This system connects **lane hardware**, a **central API**, and a **staff dashboard** into one traceable parking workflow:
+Source: **`iot/`** — Arduino C++, one binary per role (`-e entry_gate` / `-e exit_gate`).
 
-1. **Entry** — Camera OCR (or simulator buttons) → session + printed barcode ticket → ESP32 opens and closes the entry gate.
-2. **Parking** — Active sessions and revenue visible on the dashboard; invoices stored for audit.
-3. **Exit** — Invoice barcode + plate verification + ABA payment before **EXIT_APPROVED**.
-4. **Failure handling** — `EXIT_DENIED` triggers red LED and buzzer on the ESP32 simulator (and should on real hardware).
-5. **Separation** — FastAPI owns business rules; ESP32 only executes gate commands and reports sensor events.
-6. **Education-friendly** — Wokwi reproduces the full flow without physical cameras or gates.
+| Module | Purpose |
+|--------|---------|
+| `src/main.cpp` | app orchestration: sensors, RFID, backend calls, LCD/LEDs, command ack |
+| `src/rfid_reader.*` | RC522 on remapped SPI with duplicate-read suppression |
+| `src/gate_hardware.*` | servo, LEDs, cached 16x2 LCD writes |
+| `src/ultrasonic_sensor.*` | reusable HC-SR04 driver (approach + passage) |
+| `src/wifi_manager.*` | non-blocking Wi-Fi connect + retry backoff |
+| `src/api_client.*` | authenticated HTTP (device code/token), JSON via ArduinoJson |
+| `lib/parking_core/` | pure logic: UID handling, scan gate, **fail-safe gate state machine** (host-tested) |
+| `test/test_parking_logic/` | 27 Unity unit tests (`pio test -e native`) |
 
-**Scope today:** SQLite, mock KHQR, device tokens in `.env`, no staff login.
+Build / upload / test:
 
-**Future work:** Production PostgreSQL, JWT for dashboard, real ESC/POS printer, live PayWay keys, full OpenCV/cloud LPR on lane PC.
+```powershell
+cd iot
+pio run -e entry_gate          # or: pio run (default = entry)
+pio run -e exit_gate
+pio run -e entry_gate -t upload --upload-port COM5
+pio test -e native             # host unit tests (no ESP32 needed)
+```
+
+See [`iot/README.md`](iot/README.md) for wiring, secrets, expected boot logs, fail-safe details and troubleshooting.
 
 ---
 
-## Quick Start (detailed)
+## Tests
 
-Same commands as **[How to Run](#how-to-run)** above. Use **four terminals** for the full Wokwi demo (or three without the dashboard).
+| Suite | Command | Coverage |
+|-------|---------|----------|
+| Firmware unit tests | `cd iot && pio test -e native` | 27 tests: UID format/normalize, duplicate-scan suppression, entry/exit flows, auth timeout, denial, passage-blocked hold-open, sensor fault, approval latch/expiry, payment-pending, "ultrasonic alone never opens" |
+| Backend integration tests | `cd backend && .\.venv\Scripts\python.exe -m pytest` | 34 tests on an isolated DB: card registry/status/duplicates, RFID entry (session, receipt, command, ack), RFID exit (fee, payment gating, positive/negative), command expiry for **disconnected devices**, late acks, device auth, payment/invoice/ABA regression |
+| Live end-to-end | API running, then `cd backend` → `python -m scripts.test_integration` | 34 checks against a live server incl. duplicate/unknown/blocked card, gate command queue + acks, ABA QR, CORS |
 
-### Step 1 — Backend API (terminal 1)
-
-```powershell
-cd IOT-Parking
-.\.venv\Scripts\Activate.ps1
-.\scripts\run_backend.ps1
-```
-
-Or manually: `cd backend` → `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-
-Wait until you see `Application startup complete`.  
-Check: http://127.0.0.1:8000/health → `"status":"ok"`
-
-### Step 2 — Dashboard UI (terminal 2, optional)
-
-```powershell
-cd IOT-Parking\frontend
-pnpm dev
-```
-
-Open: http://localhost:3000  
-API docs: http://127.0.0.1:8000/docs
-
-### Step 3 — Wokwi IoT Gateway (terminal 3)
-
-From the repo root, run the gateway that ships with this project:
-
-```powershell
-cd IOT-Parking
-.\wokwigw_v2.0.1_Windows_64bit\wokwigw.exe
-```
-
-You should see:
-
-```text
-Listening on TCP Port 9011
-```
-
-Leave this window open. The simulator uses this to reach your PC at `host.wokwi.internal:8000`.
-
-### Step 4 — Wokwi simulation (VS Code + MicroPython)
-
-**Important:** In VS Code, `wokwi.toml` must point to the **MicroPython `.bin` firmware**, not `main.py`.  
-If you see `rst:0x3 (SW_RESET)` repeating forever, the wrong firmware was loaded — follow below.
-
-1. Open **`wokwi/parking-gate`** in VS Code (Wokwi extension).
-2. Firmware (once): `.\download_firmware.ps1` → creates `ESP32_GENERIC-20251209-v1.27.0.bin`.
-3. Install tools: `pip install mpremote==1.23`
-4. Click **Start Simulation** on `diagram.json`.
-5. Serial should show **MicroPython** banner and `>>>`, not only `ets Jul 29 2019` in a loop.
-6. Upload code (simulation must stay running):
-   ```powershell
-   cd wokwi\parking-gate
-   .\upload_to_wokwi.ps1
-   ```
-7. In the **Wokwi Serial Monitor** (not the empty VS Code Terminal tab), you should see:
-   `Booting...` → `I2C devices: [39]` → `LCD: IOT Parking | LCD Working`
-8. **`wokwi.toml`** has `gateway = "ws://localhost:9011"` — run `wokwigw.exe` (step 3).
-9. LCD then shows **API online** when the backend is up.
-
-**wokwi.com (browser):** different flow — use `firmware = 'main.py'` only on the web editor; VS Code needs the `.bin` file.
-
-### Step 5 — Test entry and exit
-
-| Action | What to do |
-|--------|------------|
-| **Entry** | Press the **green** button → entry servo opens, LCD shows `ENTRY OPEN`, receipt saved under `backend/data/receipts/` |
-| **Exit** | Press the **blue** button (after entry) → mock payment runs → exit servo opens |
-
-### Stop everything
-
-- In each terminal: **Ctrl+C**
-- Close the Wokwi gateway window
-
-### URLs
-
-| URL | Description |
-|-----|-------------|
-| http://localhost:3000 | Dashboard |
-| http://127.0.0.1:8000/docs | Swagger API |
-
-### Optional — reset database
-
-```powershell
-cd IOT-Parking\backend
-python scripts\reset_db.py
-python scripts\reset_db.py --demo
-```
+Backend tests need `pip install -r requirements-dev.txt` (adds pytest). The firmware host tests need a C++ compiler on PATH.
 
 ---
 
@@ -567,64 +302,86 @@ python scripts\reset_db.py --demo
 
 | Method | Path | Caller |
 |--------|------|--------|
-| `POST` | `/api/gate/entry/process` | Lane PC / Wokwi |
-| `POST` | `/api/gate/exit/process` | Lane PC / Wokwi |
-| `GET` | `/api/iot/commands/next?deviceCode=` | ESP32 |
-| `POST` | `/api/iot/commands/ack` | ESP32 |
-| `POST` | `/api/iot/gate/event` | ESP32 (car passed / gate closed) |
-| `POST` | `/api/payment/webhook` | ABA / simulator |
-| `GET` | `/api/payment/active-session` | Dashboard |
-| `GET` | `/api/payment/aba-qr` | Dashboard |
-| `POST` | `/api/iot/entry-scan` | Legacy IoT |
-| `POST` | `/api/iot/exit-verify` | Legacy IoT |
+| `POST` | `/api/rfid/entry-scan` | Entry ESP32 — card tap → session + `ENTRY_APPROVED` |
+| `POST` | `/api/rfid/exit-scan` | Exit ESP32 — card tap → fee / paid check |
+| `GET` | `/api/iot/commands/next?deviceCode=` | ESP32 polls gate commands |
+| `POST` | `/api/iot/commands/ack` | ESP32 acknowledges (completed/failed + detail) |
+| `POST` | `/api/iot/gate/event` | ESP32: car passed / gate closed / gate fault |
+| `POST` | `/api/iot/heartbeat` | ESP32 keep-alive |
+| `GET` | `/api/rfid/cards`, `POST /api/rfid/cards`, `POST /api/rfid/cards/{uid}` | Dashboard: register/block cards |
+| `GET` | `/api/rfid/scans`, `/api/rfid/gate-activity` | Dashboard: history + command states |
+| `POST` | `/api/gate/entry/process`, `/api/gate/exit/process` | Manual/simulator lanes (plate / verify-hash) |
+| `GET` | `/api/iot/session-status?sessionId=` | Exit station / operators |
+| `POST` | `/api/iot/open-gate` | Operator open — only for Completed + Paid sessions |
+| `POST` | `/api/payment/webhook` | ABA / KHQR gateway |
+| `GET` | `/api/payment/active-session`, `/api/payment/aba-qr` | Dashboard |
 
-Device headers: `x-device-code`, `x-device-token`. Webhook: `x-webhook-secret`.
+Device headers: `x-device-code`, `x-device-token`. Webhook: `x-webhook-secret`. Card management: optional `x-rfid-admin-token` (set `RFID_ADMIN_TOKEN`).
 
 ---
 
-## One-button lanes (camera + Wokwi)
+## Dashboard Routes
 
-| Button | API | What happens |
-|--------|-----|----------------|
-| **Entry** | `POST /api/gate/entry/trigger` | PC **OpenCV** reads plate → session + invoice → **print receipt** (`backend/data/receipts/`) → open gate → **auto-close 60s** |
-| **Exit** | `POST /api/gate/exit/trigger` | PC camera reads **invoice barcode** + **plate** → verify → **mock payment** (test) or wait for ABA → open exit gate |
+| Route | Purpose |
+|-------|---------|
+| `/` | KPIs, charts, occupancy |
+| `/parking` | Session history + filters |
+| `/payment` | Fee + ABA KHQR (live-updates via revision polling) |
+| `/invoices` | List, preview, print receipts |
+| `/rfid` | **RFID cards, scan history, gate command activity** (live-updates) |
 
-### Test on PC (no Wokwi)
+Real-time updates use the existing revision-polling pattern: the backend bumps a revision on scans, acks, gate events and payments; `useParkingLiveSync` reloads the affected pages.
 
-```powershell
-cd backend
-pip install -r requirements.txt
-# Optional: install Tesseract OCR for better plate reads
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+---
 
-# Entry — uses webcam (or --plate WK-SIM01 to skip camera)
-python devices/lane_workstation.py entry
-python devices/lane_workstation.py entry --plate 2A-1234
+## Project Structure
 
-# Exit — mock payment enabled via GATE_AUTO_MOCK_PAYMENT=true
-python devices/lane_workstation.py exit --hash YOUR_VERIFY_HASH --plate WK-SIM01
-
-# Manual mock pay
-python devices/lane_workstation.py mock-pay IN-000001
+```
+IOT-Parking/
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── core/                 # config, database, bootstrap, migrations, security
+│   │   ├── models/               # sessions, invoices, device_commands, iot_devices,
+│   │   │                         # device_logs, rfid_cards, rfid_scan_events
+│   │   ├── schemas/              # camelCase API schemas
+│   │   ├── routers/              # parking, invoices, payment, dashboard, iot, rfid, gate
+│   │   └── services/             # parking, invoice, payment, ABA, iot entry/exit,
+│   │                             # rfid, gate command/lane/exit-auto, receipt printer
+│   ├── devices/                  # optional CLI stations (entry/exit) + shared client
+│   ├── scripts/                  # reset_db, seed, test_integration
+│   ├── tests/                    # pytest suite (isolated temp DB)
+│   ├── docs/IOT_DEVICES.md       # device API + command lifecycle reference
+│   └── data/                     # SQLite + receipts (gitignored)
+│
+├── frontend/
+│   └── app/
+│       ├── pages/                # /, /parking, /payment, /invoices, /rfid
+│       ├── components/           # tables, KHQR card, invoice preview
+│       └── composables/          # API clients, live sync, table hooks
+│
+├── iot/                          # ESP32 firmware (PlatformIO, Arduino C++)
+│   ├── platformio.ini            # envs: esp32dev / entry_gate / exit_gate / native
+│   ├── include/                  # parking_config.h + parking_secrets(.example).h
+│   ├── lib/parking_core/         # host-testable logic (UID, scan gate, state machine)
+│   ├── src/                      # main + hardware/service modules
+│   └── test/test_parking_logic/  # Unity unit tests
+│
+├── scripts/run_backend.ps1
+└── README.md
 ```
 
-Or Swagger: http://127.0.0.1:8000/docs → **gate** → `entry/trigger`, `exit/trigger`, `exit/mock-payment`
+### Database tables
 
-### Wokwi troubleshooting
-
-| Symptom | Fix |
-|---------|-----|
-| `rst:0x3 (SW_RESET)` loop, `ets Jul 29 2019` only | Wrong firmware — use `ESP32_GENERIC-*.bin` in `wokwi.toml`, run `upload_to_wokwi.ps1` |
-| Serial empty / no `Booting...` | Upload `.py` files with `upload_to_wokwi.ps1`; watch **Wokwi Serial Monitor** |
-| **Blank LCD** but serial shows `LCD test OK` | Restart simulation; check LCD on GPIO 21/22 |
-| **API offline** | Start API, run `wokwigw`, port 9011 |
-| **ENTRY FAIL / active session** | Run `wokwi\parking-gate\reset_parking_db.ps1` or press entry again (re-opens same session) |
-| **EXIT / barcode error** | Press **entry** first; exit needs `verifyHash` from entry |
-| **mpremote raw repl failed** | Click Wokwi Serial Monitor → Ctrl+C → Ctrl+A → `upload_to_wokwi.ps1` again |
-
-If port **8000** is blocked, allow it in Windows Firewall or stop the other program using that port.
-
-Only open **`wokwi/parking-gate/`** in Wokwi (no other simulator folders).
+| Table | Purpose |
+|-------|---------|
+| `parking_sessions` | Visit while the vehicle is inside (`Active` → `Completed`) |
+| `invoices` | Ticket; `exit_verify_hash` for the barcode |
+| `device_commands` | Gate commands (`pending → delivered → acked/failed/expired`) with `expires_at` |
+| `iot_devices` / `device_logs` | Device registry + IoT audit trail |
+| `rfid_cards` | Registered RFID cards → plate, type, label, status |
+| `rfid_scan_events` | Every card presentation (accepted + rejected) |
+| `payment_transactions` / `bank_settings` | Payment audit + bank info |
 
 ---
 
@@ -632,11 +389,58 @@ Only open **`wokwi/parking-gate/`** in Wokwi (no other simulator folders).
 
 | File | Purpose |
 |------|---------|
-| `backend/.env.example` | API, SQLite, IoT tokens, ABA Pay |
+| `backend/.env.example` | API, SQLite, RFID cooldown/admin token, command timeout, IoT tokens, ABA Pay |
 | `frontend/.env.example` | `NUXT_PUBLIC_API_URL`, site URL |
-| `backend/devices/.env.example` | Lane device credentials |
+| `iot/include/parking_secrets.example.h` | Wi-Fi, API base URL, device tokens (copy to `parking_secrets.h`) |
 
-Do not commit `.env` or `backend/data/*.db`.
+Do not commit `.env` or `iot/include/parking_secrets.h` (both gitignored).
+
+**PostgreSQL:** the backend is SQLAlchemy-based; switch by installing
+`psycopg2-binary` and setting `DATABASE_URL=postgresql+psycopg2://user:pass@host/db`.
+SQLite remains the default for local demos.
+
+---
+
+## Security notes
+
+- **RFID UID ≠ authentication.** MIFARE Classic UIDs can be read and cloned
+  with cheap hardware. This project treats the card as an identifier for a
+  local demo; a production parking system needs a second factor (staff gate,
+  PIN entry, secure-element/diversified-key cards, or license-plate
+  cross-check).
+- Device tokens default to `secret-*-token` — replace them in `backend/.env`
+  **and** `iot/include/parking_secrets.h` for anything beyond local demos.
+- Set `RFID_ADMIN_TOKEN` in production so card registration/blocking requires
+  the `x-rfid-admin-token` header.
+- Gate approvals expire (180 s): a stale "open gate" command can never execute
+  later, and disconnected gates surface as `expired` in gate activity.
+- The passage safety sensor is fail-safe: blocked or faulty ⇒ gate holds open
+  and reports `gate_fault` instead of closing on a vehicle.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| ESP32 LCD `WiFi offline` | wrong SSID/password in `parking_secrets.h`, or out of range |
+| ESP32 LCD `RFID reader error` | RC522 wiring / 3.3 V; SS 4, SCK 14, MOSI 23, MISO 19, RST 27 |
+| Scan denied "Card not registered" | register the UID on the dashboard `/rfid` page |
+| Exit stays locked with fee shown | complete payment (KHQR webhook / Payment page / `exit/mock-payment`) |
+| Gate never opens after scan | API unreachable from the gate (LAN IP + firewall), or token mismatch with `backend/.env` |
+| `FAILSAFE open` on LCD | passage sensor blocked/faulty — clear the passage; gate closes when safe |
+| Commands stuck `pending` then `expired` | gate did not poll (offline) — check power/Wi-Fi; approvals expire by design |
+| Port 8000 blocked | allow it in Windows Firewall or free the port |
+
+---
+
+## Reset / seed data
+
+```powershell
+cd backend
+python scripts/reset_db.py          # wipe + recreate (dev only)
+python scripts/reset_db.py --demo   # + sample sessions
+```
 
 ---
 
@@ -645,7 +449,7 @@ Do not commit `.env` or `backend/data/*.db`.
 ```powershell
 git add .
 git status
-git commit -m "Initial commit: IOT Parking System"
+git commit -m "Smart IoT Parking: RFID gates, backend integration, dashboard"
 git branch -M main
 git remote add origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
 git push -u origin main

@@ -1,20 +1,23 @@
-from decimal import Decimal
-
 from sqlalchemy.orm import Session
 
 from app.models.iot_device import IotDevice
 from app.schemas.gate import GateCommandOut, GateEntryProcessIn, GateExitProcessIn, GateProcessOut
 from app.schemas.iot import EntryScanIn, ExitVerifyIn
 from app.services.gate_command_service import GateCommandService
-from app.services.gate_ocr_service import GateOcrService
 from app.services.iot_device_service import IotDeviceService
 from app.services.iot_entry_service import IotEntryService
 from app.services.iot_exit_service import IotExitService
-from app.services.printer_service import PrinterService
 from app.utils.exit_verify_utils import normalize_verify_hash_scan
 
 
 class GateLaneService:
+    """Plate-based entry + verify-hash exit for manual lanes and simulators.
+
+    The RFID firmware drives its own flow (services/rfid_service.py) on top of
+    the same IotEntryService / IotExitService / GateCommandService building
+    blocks; this service covers the manual/simulator lane.
+    """
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.commands = GateCommandService(db)
@@ -25,10 +28,10 @@ class GateLaneService:
     def process_entry(self, body: GateEntryProcessIn) -> GateProcessOut:
         plate = (body.license_plate or "").strip().upper()
         if not plate:
-            try:
-                plate = GateOcrService.recognize_plate(image_base64=body.image_base64)
-            except ValueError as exc:
-                return GateProcessOut(success=False, message=str(exc))
+            return GateProcessOut(
+                success=False,
+                message="licensePlate is required — camera/OCR entry was replaced by the RFID reader.",
+            )
 
         device = self._device(body.target_device)
         if not device:
@@ -64,12 +67,11 @@ class GateLaneService:
             plateNumber=result.license_plate,
             printData=result.print_data,
         )
-        execute_local = body.source == "simulator"
         return GateProcessOut(
             success=True,
             message=result.message,
             gateCommand=gate_cmd,
-            executeOnDevice=execute_local,
+            executeOnDevice=body.source == "simulator",
         )
 
     def process_exit(self, body: GateExitProcessIn) -> GateProcessOut:

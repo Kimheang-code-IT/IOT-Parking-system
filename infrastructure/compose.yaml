@@ -1,0 +1,174 @@
+# =============================================================================
+# Smart IoT Parking — local production stack
+#
+#   nginx (published HTTP_PORT) -> frontend (Nuxt SSR)   :3000   [app-net]
+#                              -> backend  (FastAPI)     :8000   [app-net, db-net]
+#                                        -> db (PostgreSQL) :5432 [db-net, internal]
+#
+# Usage (from infrastructure/):  docker compose up -d
+# The Windows PowerShell helpers in scripts/ wrap build/up/health/backup.
+# =============================================================================
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+name: ${COMPOSE_PROJECT_NAME:-iot-parking}
+
+services:
+  # ---------------------------------------------------------------- database
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in infrastructure/.env}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in infrastructure/.env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infrastructure/.env}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - db-net
+    # NOTE: no published ports — PostgreSQL is reachable only from the
+    # private Docker network (backend has the credentials).
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\" -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 60s
+    mem_limit: 1g
+    logging: *default-logging
+
+  # ----------------------------------------------------------------- backend
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Container-internal connection string (overrides .env / host values).
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Generated parking receipts survive container recreation.
+      - receipts_data:/app/data/receipts
+    networks:
+      - app-net
+      - db-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 30s
+    mem_limit: 1g
+    logging: *default-logging
+
+  # ------------------------------------------------------- one-off migration
+  # Explicit migration step (run by start.ps1 before the API starts):
+  #   docker compose --profile migrate run --rm migrate
+  # Creates/updates the schema via Alembic and seeds baseline rows.
+  # Idempotent and never destructive; the API also self-heals missing tables.
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: ../backend
+      dockerfile: ../infrastructure/docker/backend.Dockerfile
+    command: ["python", "-m", "scripts.run_migrations"]
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      APP_ENV: ${APP_ENV:-production}
+    networks:
+      - db-net
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- frontend
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../infrastructure/docker/frontend.Dockerfile
+    environment:
+      # Same-origin API calls through the nginx reverse proxy ("/api/...").
+      NUXT_PUBLIC_API_URL: ${NUXT_PUBLIC_API_URL:-/}
+      NUXT_PUBLIC_SITE_URL: ${NUXT_PUBLIC_SITE_URL:-http://localhost}
+      NITRO_PORT: "3000"
+      NITRO_HOST: "0.0.0.0"
+    networks:
+      - app-net
+    # No published ports — reachable only through nginx.
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 15s
+    mem_limit: 1g
+    logging: *default-logging
+
+  # ------------------------------------------------------------------ nginx
+  nginx:
+    image: nginx:1.29-alpine
+    ports:
+      # Only this service is published to the LAN. Set HTTP_PORT in .env.
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - app-net
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 10s
+    mem_limit: 256m
+    logging: *default-logging
+
+# ---------------------------------------------------------------- networks
+networks:
+  # Public edge: nginx + frontend + backend (internet-capable for ABA PayWay)
+  app-net:
+    driver: bridge
+  # Private database network: backend + db only, no external connectivity
+  db-net:
+    driver: bridge
+    internal: true
+
+# ---------------------------------------------------------------- volumes
+volumes:
+  # PostgreSQL data files (persistent — `docker compose down` keeps them)
+  postgres_data:
+  # Generated parking receipts / barcode tickets
+  receipts_data:

@@ -1,0 +1,16 @@
+# iot/include
+
+Project headers shared by the firmware sources:
+
+- `parking_config.h` — pin map, timings, role/device constants (both gate roles).
+- `parking_secrets.example.h` — template for Wi-Fi credentials, API base URL
+  and device tokens.
+
+Create your private config once:
+
+```powershell
+Copy-Item parking_secrets.example.h parking_secrets.h
+```
+
+`parking_secrets.h` is git-ignored; `parking_config.h` automatically includes
+it when present and falls back to safe development defaults otherwise.

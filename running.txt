@@ -1,22 +1,48 @@
-- backend run
+- Docker stack (PostgreSQL + FastAPI + Nuxt + nginx)
+
+cd D:\IOT-Parking\infrastructure
+Copy-Item .env.example .env      (once; fill in secrets)
+.\scripts\start.ps1              (build, migrate, start, health, URLs)
+.\scripts\stop.ps1               (volumes are preserved)
+.\scripts\restart.ps1 backend
+.\scripts\backup-db.ps1
+.\scripts\restore-db.ps1 -BackupFile .\backups\xxx.dump
+
+- backend run (no Docker, SQLite)
 
 cd D:\IOT-Parking
 .\.venv\Scripts\Activate.ps1
 .\scripts\run_backend.ps1
 
-- Frontend run
+- Frontend run (no Docker)
 
 cd D:\IOT-Parking\frontend
 pnpm dev
 
-- getway run
+- ESP32 firmware (RFID gates)
 
-Run the gateway: .\wokwigw_v2.0.1_Windows_64bit\wokwigw.exe
+cd D:\IOT-Parking\iot
+Copy-Item include\parking_secrets.example.h include\parking_secrets.h   (once)
+# Docker stack: PARKING_API_BASE_URL = http://<PC-LAN-IP>  (nginx port 80)
+# Local backend: PARKING_API_BASE_URL = http://<PC-LAN-IP>:8000
+pio run -e entry_gate -t upload --upload-port COM5
+pio run -e exit_gate  -t upload --upload-port COM7
+pio device monitor -b 115200
 
+- firmware unit tests (PC)
 
-- In VS Code, open wokwi/parking-gate/diagram.json → Start Simulation
+cd D:\IOT-Parking\iot
+pio test -e native
 
-- upload frimeware
+- backend tests
 
-cd D:\IOT-Parking\wokwi\parking-gate
-.\upload_to_wokwi.ps1
+cd D:\IOT-Parking\backend
+.\.venv\Scripts\python.exe -m pytest
+python -m scripts.test_integration        (API must be running)
+
+- Dashboard URLs
+
+Docker:  http://localhost          dashboard (incl. /rfid card page)
+         http://localhost/docs     API docs
+Local:   http://localhost:3000     dashboard
+         http://127.0.0.1:8000/docs  API docs

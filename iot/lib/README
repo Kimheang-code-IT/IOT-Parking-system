@@ -1,0 +1,10 @@
+# iot/lib
+
+- `parking_core/` — pure C++ logic shared by the firmware **and** the host unit
+  tests. It has no Arduino dependencies, so `pio test -e native` can run on a PC:
+  - `rfid_uid.*` — UID byte→hex formatting, normalization/validation
+  - `scan_gate.*` — duplicate RFID read suppression
+  - `gate_flow.*` — the fail-safe gate state machine (entry + exit, payment
+    pending, passage safety hold-open, approval latch/expiry)
+
+Keep new pure logic in `parking_core` when you want it covered by host tests.
